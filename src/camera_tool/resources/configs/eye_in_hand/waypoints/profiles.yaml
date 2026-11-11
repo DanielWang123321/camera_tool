@@ -1,0 +1,61 @@
+# Generic Robot Kinematic & Workspace Profiles
+
+profiles:
+  arm_6dof:
+    name: "6-DoF Standard Arm (700mm)"
+    dof: 6
+    device_type: 6
+    reach_mm: 700
+    workspace_min_m: [0.20, -0.32, 0.30]
+    workspace_max_m: [0.62, 0.32, 0.58]
+    default_board_center_m: [0.40, 0.00, 0.00]
+    preset_file: "configs/eye_in_hand/waypoints/close_range.yaml"
+    supported: true
+
+  arm_5dof:
+    name: "5-DoF Arm (700mm)"
+    dof: 5
+    device_type: 5
+    reach_mm: 700
+    workspace_min_m: [0.20, -0.30, 0.30]
+    workspace_max_m: [0.60, 0.30, 0.55]
+    default_board_center_m: [0.40, 0.00, 0.00]
+    preset_file: "configs/eye_in_hand/waypoints/arm_5dof.yaml"
+    supported: false
+    notes: "5-DoF kinematics constraint; manual sampling supported."
+
+  arm_7dof:
+    name: "7-DoF Redundant Arm (700mm)"
+    dof: 7
+    device_type: 7
+    reach_mm: 700
+    workspace_min_m: [0.20, -0.32, 0.30]
+    workspace_max_m: [0.62, 0.32, 0.55]
+    default_board_center_m: [0.40, 0.00, 0.00]
+    preset_file: "configs/eye_in_hand/waypoints/arm_7dof.yaml"
+    supported: false
+    notes: "7-DoF redundant kinematics; manual sampling supported."
+
+  arm_compact_6dof:
+    name: "6-DoF Compact Arm (440mm)"
+    dof: 6
+    device_type: 9
+    reach_mm: 440
+    workspace_min_m: [0.15, -0.20, 0.24]
+    workspace_max_m: [0.38, 0.20, 0.42]
+    default_board_center_m: [0.26, 0.00, 0.00]
+    preset_file: "configs/eye_in_hand/waypoints/arm_compact_6dof.yaml"
+    supported: false
+    notes: "Compact 440mm reach; manual sampling supported."
+
+  arm_long_6dof:
+    name: "6-DoF Extended Arm (850mm)"
+    dof: 6
+    device_type: 12
+    reach_mm: 850
+    workspace_min_m: [0.25, -0.40, 0.30]
+    workspace_max_m: [0.72, 0.40, 0.60]
+    default_board_center_m: [0.45, 0.00, 0.00]
+    preset_file: "configs/eye_in_hand/waypoints/arm_long_6dof.yaml"
+    supported: false
+    notes: "Extended 850mm reach; manual sampling supported."

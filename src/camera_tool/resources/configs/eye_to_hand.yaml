@@ -1,0 +1,96 @@
+# Eye-to-Hand Calibration Template (Fixed RGB-D + Wrist Camera + Tabletop Marker)
+# Units: meters & degrees unless suffixed (_mm / _px / _s).
+
+marker:
+  dictionary: DICT_ARUCO_ORIGINAL
+  id: 398
+  side_m: 0.15
+  min_area_px: 1200
+  min_sharpness: 30
+  max_pnp_rms_px: 1.5
+
+robot:
+  ip: ""  # Set via --robot-ip, XARM_IP env var, or GUI input
+  workspace_min: [200, -220, 5]
+  workspace_max: [610, 450, 400]
+
+wrist_camera:
+  backend: "uvc"
+  serial: ""  # Leave empty to auto-select when a single UVC camera is connected
+  by_id_prefix: "usb-XVisio_Technology_XVisio_vSLAM_"
+  by_id_suffix: "-video-index0"
+  fourcc: "YU12"
+  fps: 100
+  warmup_frames: 8
+  camera_index: 1
+  capture_size: [1280, 1280]
+  rectified_size: [960, 960]
+  rectified_fov_deg: 95
+  intrinsics: ""  # Defaults to local intrinsics/wrist_<serial>.json
+
+fixed_camera:
+  backend: "realsense"
+  serial: ""  # Leave empty to auto-select when a single RGB-D camera is connected
+  width: 1280
+  height: 720
+  fps: 30
+  frames: 15
+
+motion:
+  workspace_min_m: [0.20, -0.22, 0.08]
+  workspace_max_m: [0.61, 0.45, 0.40]
+  search_center_m: [0.42, 0.04, 0.30]
+  search_rpy_deg: [180, 0, 0]
+  park_tcp_m: [0.30, -0.15, 0.30]
+  park_rpy_deg: [180, 0, 0]
+  joint_margin_deg: 10
+  joint_step_deg: 8
+  path_sample_deg: 1
+  translation_step_m: 0.015
+  rotation_step_deg: 5
+  speed_deg_s: 8
+  acceleration_deg_s2: 20
+  settle_s: 0.6
+  settle_position_mm: 0.3
+  settle_rotation_deg: 0.1
+  move_timeout_s: 20
+  max_attempts: 80
+
+checks:
+  min_rotation_deg: 6
+  mean_mm: 3
+  max_mm: 5
+  mean_deg: 1
+  max_deg: 3
+  max_rms_px: 6.5
+  board_max_tilt_deg: 10
+  table_z_m: 0
+  board_height_tolerance_m: 0.03
+  static_corner_drift_px: 2
+  depth_min_points: 100
+  depth_median_mm: 8
+  depth_p95_mm: 15
+  depth_normal_deg: 3
+  depth_table_height_mm: 15
+
+tripod_watch:
+  baseline_dir: result/scene_lock
+  lock_frames: 8
+  max_features: 400
+  min_lock_features: 80
+  min_inliers: 30
+  warn_table_mm: 1.5
+  fail_table_mm: 3.0
+  confirm_frames: 15
+  workspace_margin_m: 0.05
+  table_rim_m: 0.04
+  max_flow_fb_px: 1.5
+  ransac_reproj_px: 2.5
+  depth_jump_m: 0.06
+  min_depth_m: 0.15
+  max_depth_m: 3.0
+  grid_n: 8
+  orb_fallback_tracks: 40
+  table_height_tolerance_m: 0.03
+  plane_fit_points: 4000
+  plane_inlier_m: 0.012

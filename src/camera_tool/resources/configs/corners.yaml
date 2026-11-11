@@ -1,0 +1,8 @@
+# Tabletop ArUco four-corner TCP coordinates in robot base frame (mm).
+# Orientation standing behind the robot base: +X = forward/top, +Y = left.
+corners_mm:
+  左下: [0.0, 0.0, 0.0]
+  右下: [0.0, 0.0, 0.0]
+  右上: [0.0, 0.0, 0.0]
+  左上: [0.0, 0.0, 0.0]
+marker_length_mm: 150

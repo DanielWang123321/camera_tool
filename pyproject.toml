@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camera-tool"
+version = "0.0.1"
+description = "Unified camera preview, hand-eye calibration, offline replay, and device diagnostics"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "opencv-python>=4.8,<5",
+  "pyyaml>=6",
+  "PySide6>=6.6,<6.12",
+  "pyqtgraph>=0.13",
+  "PyOpenGL>=3.1",
+]
+
+[project.optional-dependencies]
+realsense = ["pyrealsense2>=2.54"]
+orbbec = ["pyorbbecsdk>=2.0"]
+robot = ["xarm-python-sdk>=1.13"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+camera-tool = "camera_tool.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+camera_tool = ["resources/**/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

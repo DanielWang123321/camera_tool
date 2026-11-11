@@ -1,0 +1,108 @@
+# Close-Range Eye-in-Hand Flange Waypoints (optical distance ~255-365 mm)
+# Poses are in FLANGE coordinates [x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg] (extrinsic 'xyz').
+
+profile: "arm_6dof"
+dof: 6
+device_type: 6
+
+workspace:
+  flange_min_m: [0.22, -0.28, 0.30]
+  flange_max_m: [0.58, 0.28, 0.52]
+  target_center_m: [0.40, 0.00, 0.00]
+
+motion:
+  joint_margin_deg: 8.0
+  joint_step_deg: 8.0
+  path_sample_deg: 1.0
+  translation_step_m: 0.015
+  rotation_step_deg: 5.0
+  speed_deg_s: 10.0
+  acceleration_deg_s2: 25.0
+  settle_s: 0.5
+  settle_position_mm: 0.3
+  settle_rotation_deg: 0.1
+  move_timeout_s: 20.0
+
+park_flange_pose: [320.0, 0.0, 360.0, 180.0, 0.0, 0.0]
+
+eye_in_hand_waypoints:
+  - id: 1
+    name: "center_mid_0"
+    flange_pose: [360.0, 10.0, 355.0, 180.0, 0.0, 0.0]
+    role: "train"
+  - id: 2
+    name: "rear_tilt_fwd"
+    flange_pose: [300.0, 10.0, 355.0, 180.0, -10.5, 0.0]
+    role: "train"
+  - id: 3
+    name: "front_tilt_back"
+    flange_pose: [425.0, 10.0, 355.0, 180.0, 10.5, 8.0]
+    role: "train"
+  - id: 4
+    name: "right_tilt_left"
+    flange_pose: [360.0, -55.0, 355.0, -170.0, 0.0, -10.0]
+    role: "train"
+  - id: 5
+    name: "left_tilt_right"
+    flange_pose: [360.0, 75.0, 355.0, 170.0, 0.0, 10.0]
+    role: "check"
+  - id: 6
+    name: "rear_right_diag"
+    flange_pose: [310.0, -45.0, 360.0, -171.5, -8.5, -15.0]
+    role: "train"
+  - id: 7
+    name: "rear_left_diag"
+    flange_pose: [310.0, 65.0, 360.0, 171.5, -8.5, 15.0]
+    role: "train"
+  - id: 8
+    name: "front_right_diag"
+    flange_pose: [415.0, -45.0, 360.0, -171.5, 8.5, 14.0]
+    role: "train"
+  - id: 9
+    name: "front_left_diag"
+    flange_pose: [415.0, 65.0, 360.0, 171.5, 8.5, -14.0]
+    role: "train"
+  - id: 10
+    name: "high_center_yaw_pos"
+    flange_pose: [355.0, -15.0, 405.0, 180.0, 0.0, 24.0]
+    role: "check"
+  - id: 11
+    name: "high_center_yaw_neg"
+    flange_pose: [355.0, 30.0, 405.0, 180.0, 0.0, -24.0]
+    role: "train"
+  - id: 12
+    name: "high_rear_steep"
+    flange_pose: [280.0, -25.0, 400.0, -174.0, -13.0, -18.0]
+    role: "train"
+  - id: 13
+    name: "high_front_steep"
+    flange_pose: [440.0, 35.0, 400.0, 174.0, 13.0, 18.0]
+    role: "train"
+  - id: 14
+    name: "high_right_steep"
+    flange_pose: [350.0, -75.0, 395.0, -167.0, -2.0, 20.0]
+    role: "train"
+  - id: 15
+    name: "high_left_steep"
+    flange_pose: [370.0, 95.0, 395.0, 167.0, 2.0, -20.0]
+    role: "check"
+  - id: 16
+    name: "low_center_yaw"
+    flange_pose: [360.0, 15.0, 335.0, 180.0, 0.0, -12.0]
+    role: "train"
+  - id: 17
+    name: "low_rear_left"
+    flange_pose: [320.0, 50.0, 335.0, 173.0, -7.0, 12.0]
+    role: "train"
+  - id: 18
+    name: "low_front_right"
+    flange_pose: [388.0, -30.0, 340.0, -174.0, 5.5, -12.0]
+    role: "train"
+  - id: 19
+    name: "low_rear_right"
+    flange_pose: [320.0, -30.0, 340.0, -174.0, -7.0, 16.0]
+    role: "train"
+  - id: 20
+    name: "low_front_left"
+    flange_pose: [388.0, 45.0, 340.0, 174.0, 5.5, -16.0]
+    role: "check"

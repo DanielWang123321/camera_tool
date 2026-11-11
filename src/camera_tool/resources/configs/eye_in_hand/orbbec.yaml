@@ -1,0 +1,46 @@
+# Eye-in-Hand Calibration Template — Orbbec RGB-D (1280x800@30)
+
+marker:
+  dictionary: DICT_ARUCO_ORIGINAL
+  id: 398
+  side_m: 0.15
+  thickness_m: 0.001
+  min_area_px: 1200
+  min_sharpness: 30
+  max_pnp_rms_px: 1.5
+
+camera:
+  backend: "orbbec"
+  serial: ""  # Leave empty to auto-select when a single device is connected
+  width: 1280
+  height: 800
+  fps: 30
+  align_depth_to_color: true
+  min_depth_m: 0.07
+  max_depth_m: 0.90
+  nominal_flange_cam_mm_deg: [45.0, 0.0, 62.0, 0.0, 0.0, 0.0]
+
+robot:
+  ip: ""  # Set via --robot-ip, XARM_IP env var, or GUI input
+  default_profile: "arm_6dof"
+  preset_file: "configs/eye_in_hand/waypoints/close_range.yaml"
+  tool:
+    length_m: 0.185
+    radius_m: 0.065
+    min_flange_z_m: 0.300
+    min_tip_z_m: 0.080
+    table_z_m: 0.000
+
+checks:
+  min_samples: 8
+  recommended_samples: 20
+  min_rotation_deg: 6.0
+  max_mean_mm: 3.0
+  max_pose_mm: 6.0
+  max_mean_deg: 1.0
+  max_pose_deg: 3.0
+  max_reproj_rms_px: 2.0
+  board_max_tilt_deg: 12.0
+  board_height_tolerance_m: 0.04
+  table_z_m: 0.000
+  board_thickness_m: 0.001

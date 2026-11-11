@@ -1,0 +1,30 @@
+# Python & build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local-only notes, legacy workspace, and hardware-specific overrides (never commit)
+AGENTS.md
+worklog.md
+/cali_tool/
+/intrinsics/
+/configs/
+
+# Runtime sessions, published extrinsics, and diagnostic outputs
+/runs/
+/result/
+/dev/
+*.csv
+last_*.png
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
