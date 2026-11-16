@@ -21,7 +21,7 @@ from camera_tool.core import (
     valid_transform,
     write_json,
 )
-from camera_tool.paths import DATA_ROOT, project_path
+from camera_tool.paths import DATA_ROOT, output_path
 
 DEFAULT_WATCH = {
     "baseline_dir": "result/scene_lock",
@@ -68,7 +68,7 @@ def camera_from_rs_color(ci: dict) -> CameraModel:
     elif model_name in ("distortion.brown_conrady", "brown_conrady"):
         model = "brown_conrady"
     else:
-        raise CalibrationError(f"彩色畸变模型尚不支持：{model_name}")
+        raise CalibrationError(f"Unsupported color distortion model: {model_name}")
     return CameraModel(
         {
             "width": int(ci["width"]),
@@ -104,7 +104,7 @@ def resolve_baseline_dir(raw: str | Path) -> Path:
     path = Path(raw)
     if not path.is_absolute():
         path = DATA_ROOT / path
-    return project_path(path)
+    return output_path(path)
 
 
 def gray_image(color: np.ndarray) -> np.ndarray:
@@ -214,7 +214,7 @@ def fit_plane_ransac(points: np.ndarray, cfg: dict, rng: Any = None) -> dict[str
     if normal[2] > 0:
         normal = -normal
     d = float(normal @ center)
-    return {"normal": normal, "d": d, "n_inliers": int(len(inliers))}
+    return {"normal": normal, "d": d, "n_inliers": len(inliers)}
 
 
 def table_points_camera(
@@ -306,9 +306,9 @@ def lock_scene(
 ) -> Baseline:
     cfg = watch_settings(cfg)
     if color.shape[:2] != (camera.height, camera.width):
-        raise CalibrationError("锁基线图像尺寸与内参不一致")
+        raise CalibrationError("Baseline lock color image dimensions do not match intrinsics")
     if depth_m.shape[:2] != (camera.height, camera.width):
-        raise CalibrationError("锁基线深度尺寸与内参不一致")
+        raise CalibrationError("Baseline lock depth image dimensions do not match intrinsics")
     x_base_camera = valid_transform(x_base_camera)
     mask = static_mask(depth_m, camera, x_base_camera, bbox_min, bbox_max, cfg, table_z_m)
     gray = gray_image(color)
@@ -316,11 +316,13 @@ def lock_scene(
         gray, maxCorners=int(cfg["max_features"]), qualityLevel=0.01, minDistance=10, blockSize=7, mask=mask
     )
     if corners is None:
-        raise CalibrationError("静物角点不足，无法锁基线（画面里工作区外要有桌沿/地面/机座）")
+        raise CalibrationError(
+            "Insufficient static background corners to lock baseline (include table edges/floor/stand outside workspace)"
+        )
     pixels, points = _features_with_depth(corners.reshape(-1, 2).astype(np.float32), depth_m, camera, cfg)
     if len(pixels) < int(cfg["min_lock_features"]):
         raise CalibrationError(
-            f"有效静物三维点只有 {len(pixels)} 个，需要至少 {cfg['min_lock_features']} 个才能锁基线"
+            f"Only {len(pixels)} valid static 3D features found; at least {cfg['min_lock_features']} required to lock baseline"
         )
     orb = cv2.ORB_create(nfeatures=800)
     kps, des = orb.detectAndCompute(gray, mask)
@@ -364,10 +366,10 @@ def lock_scene(
 def save_baseline(baseline: Baseline, directory: str | Path) -> Path:
     directory = resolve_baseline_dir(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    color_path = project_path(directory / "baseline_color.png")
+    color_path = output_path(directory / "baseline_color.png")
     if not cv2.imwrite(str(color_path), baseline.color):
-        raise CalibrationError(f"无法写入 {color_path}")
-    np.save(project_path(directory / "baseline_depth.npy"), baseline.depth_m)
+        raise CalibrationError(f"Failed to write {color_path}")
+    np.save(output_path(directory / "baseline_depth.npy"), baseline.depth_m)
     plane = None
     if baseline.plane is not None:
         plane = {
@@ -376,7 +378,7 @@ def save_baseline(baseline: Baseline, directory: str | Path) -> Path:
             "n_inliers": int(baseline.plane["n_inliers"]),
         }
     np.savez_compressed(
-        project_path(directory / "features.npz"),
+        output_path(directory / "features.npz"),
         pixels=baseline.pixels,
         points_cam=baseline.points_cam,
         orb_pixels=baseline.orb_pixels,
@@ -404,8 +406,8 @@ def save_baseline(baseline: Baseline, directory: str | Path) -> Path:
             "bbox_max": baseline.bbox_max.tolist(),
             "table_z_m": baseline.table_z_m,
             "depth_scale": baseline.depth_scale,
-            "n_features": int(len(baseline.pixels)),
-            "n_orb": int(len(baseline.orb_pixels)),
+            "n_features": len(baseline.pixels),
+            "n_orb": len(baseline.orb_pixels),
             "plane": plane,
         },
     )
@@ -425,7 +427,7 @@ def load_baseline(
     feat_path = directory / "features.npz"
     for path in (meta_path, color_path, depth_path, feat_path):
         if not path.exists():
-            raise CalibrationError(f"没有场景基线 {path.name}，请先运行 camera-tool tripod lock")
+            raise CalibrationError(f"Missing scene baseline file {path.name}; run 'camera-tool tripod lock' first")
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     stored = camera_from_meta(meta)
     if camera is not None:
@@ -435,14 +437,14 @@ def load_baseline(
             or not np.allclose(camera.k, stored.k, atol=0.5)
             or not np.allclose(camera.distortion, stored.distortion, atol=1e-6)
         ):
-            raise CalibrationError("当前相机内参与锁基线时不一致，请重新执行 tripod lock")
+            raise CalibrationError("Current camera intrinsics differ from locked baseline; re-run tripod lock")
     if serial is not None and str(meta.get("serial")) != str(serial):
-        raise CalibrationError(f"基线序列号 {meta.get('serial')} 与当前相机 {serial} 不一致")
+        raise CalibrationError(f"Baseline serial {meta.get('serial')} does not match camera {serial}")
     if x_base_camera is not None and hash_transform(x_base_camera) != meta.get("extrinsics_hash"):
-        raise CalibrationError("标定结果外参已更新，请重新执行 tripod lock")
+        raise CalibrationError("Published extrinsics changed since baseline lock; re-run tripod lock")
     color = cv2.imread(str(color_path), cv2.IMREAD_COLOR)
     if color is None:
-        raise CalibrationError("无法读取 baseline_color.png")
+        raise CalibrationError("Failed to read baseline_color.png")
     depth_m = np.load(depth_path)
     feat = np.load(feat_path)
     plane = None
@@ -592,7 +594,7 @@ def estimate_camera_motion(
     x = transform(rotation, tvec)
     projected = camera.project(transform_points(x, obj[inliers]))
     rms = float(np.sqrt(np.mean(np.sum((projected - img[inliers]) ** 2, axis=1))))
-    return {"X_now_from_old": x, "inliers": inliers, "n_inliers": int(len(inliers)), "rms_px": rms}
+    return {"X_now_from_old": x, "inliers": inliers, "n_inliers": len(inliers), "rms_px": rms}
 
 
 def intersect_table(
@@ -773,7 +775,7 @@ def observe_frame(
 ) -> Observation:
     cfg = watch_settings(cfg)
     if color.shape[:2] != (baseline.camera.height, baseline.camera.width):
-        raise CalibrationError("当前图像尺寸与基线不一致")
+        raise CalibrationError("Live frame dimensions do not match locked baseline")
     gray = gray_image(color)
     idx, px_lk = lk_track(baseline.gray, gray, baseline.pixels, cfg)
     points = baseline.points_cam[idx] if len(idx) else np.zeros((0, 3))
@@ -798,7 +800,7 @@ def observe_frame(
                 rejected = np.zeros((0, 2), np.float32)
     motion = estimate_camera_motion(points, px_now, baseline.camera, cfg)
     if motion is None:
-        return _empty_observation("TRACK_LOST", "静物内点不足，无法判断三脚架是否移动", n_tracks)
+        return _empty_observation("TRACK_LOST", "Insufficient static inliers to estimate tripod motion", n_tracks)
     table = table_apparent_shift(
         motion["X_now_from_old"],
         baseline.camera,
@@ -809,7 +811,7 @@ def observe_frame(
         int(cfg["grid_n"]),
     )
     if table is None:
-        return _empty_observation("TRACK_LOST", "桌面网格无法投影", n_tracks)
+        return _empty_observation("TRACK_LOST", "Tabletop grid projection failed", n_tracks)
     cam_mm, cam_deg = pose_error(motion["X_now_from_old"], np.eye(4))
     current_plane = fit_plane_ransac(
         table_points_camera(
@@ -829,7 +831,7 @@ def observe_frame(
     if len(rejected):
         rej = np.vstack([rej, rejected]) if len(rej) else rejected
     status = classify_status(table["p95_mm"], motion["n_inliers"], cfg)
-    reason = "ORB 兜底" if used_orb else ""
+    reason = "ORB fallback" if used_orb else ""
     return Observation(
         status=status,
         reason=reason,

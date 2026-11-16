@@ -10,7 +10,10 @@ import yaml
 from scipy.spatial.transform import Rotation
 
 from camera_tool.calibration.eye_in_hand.session import CalibrationSession
-from camera_tool.calibration.eye_in_hand.solver import evaluate_board_geometry, evaluate_depth_consistency
+from camera_tool.calibration.eye_in_hand.solver import (
+    evaluate_board_geometry,
+    evaluate_depth_consistency,
+)
 from camera_tool.calibration.eye_in_hand.waypoints import WaypointPlanner
 from camera_tool.cli import main as cli_main
 from camera_tool.core import (
@@ -28,7 +31,11 @@ from camera_tool.core import (
 from camera_tool.devices.realsense import RealSenseCamera
 from camera_tool.diagnostics.usb_link import find_realsense_sysfs
 from camera_tool.paths import config_path
-from camera_tool.services.eye_in_hand import EyeInHand, detect_usb_camera_backend, solve_session
+from camera_tool.services.eye_in_hand import (
+    EyeInHand,
+    detect_usb_camera_backend,
+    solve_session,
+)
 
 
 def _euler_xyz_to_matrix(euler6: list[float]) -> np.ndarray:
@@ -370,6 +377,7 @@ def test_robot_ip_override_priority(monkeypatch, tmp_path) -> None:
 
 def test_gui_backend_preset_selectors_and_robot_ip_input(monkeypatch) -> None:
     from PySide6.QtWidgets import QApplication
+
     import camera_tool.ui.main_window as mw_mod
 
     monkeypatch.delenv("XARM_IP", raising=False)

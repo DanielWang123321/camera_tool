@@ -4,7 +4,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from camera_tool.calibration.eye_to_hand.workflow import LiveCalibration, load_settings, publish_camera
+from camera_tool.calibration.eye_to_hand.workflow import (
+    LiveCalibration,
+    load_settings,
+    publish_camera,
+)
 from camera_tool.core import Session, write_json
 from camera_tool.paths import config_path
 from camera_tool.services.tasks import DEVICES, resource
@@ -50,7 +54,7 @@ def calibrate(
             },
         )
 
-    with DEVICES.lease(resources, "眼在手外标定"):
+    with DEVICES.lease(resources, "Eye-to-Hand Calibration"):
         try:
             context.check()
             session = Session(output, "check" if check else "live", on_event=progress)

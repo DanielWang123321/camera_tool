@@ -1,23 +1,38 @@
-"""三脚架监控：已知微动应换成约 3 mm 桌面位移；运动物体不应报相机在动。"""
+"""Tripod drift monitor tests: known micro-motion yields ~3 mm table shift; moving objects do not trigger false drift."""
 from __future__ import annotations
 
 import shutil
-import sys
 import unittest
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import yaml
 from scipy.spatial.transform import Rotation
 
-from camera_tool.core import CameraModel, inv, pose_error, transform, transform_points, valid_transform
-from camera_tool.diagnostics.scene_lock import (ConfirmGate, classify_status, estimate_camera_motion, filter_dynamic,
-                            intersect_table, load_baseline, lock_scene, observe_frame, save_baseline,
-                            static_mask, table_apparent_shift, watch_settings)
+from camera_tool.core import (
+    CameraModel,
+    inv,
+    pose_error,
+    transform,
+    transform_points,
+    valid_transform,
+)
+from camera_tool.diagnostics.scene_lock import (
+    ConfirmGate,
+    classify_status,
+    estimate_camera_motion,
+    filter_dynamic,
+    intersect_table,
+    load_baseline,
+    lock_scene,
+    observe_frame,
+    save_baseline,
+    static_mask,
+    table_apparent_shift,
+    watch_settings,
+)
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def synthetic_camera():
@@ -121,7 +136,7 @@ class SceneLockTests(unittest.TestCase):
         self.assertEqual(classify_status(table["p95_mm"], motion["n_inliers"], self.cfg), "OK")
 
     def test_static_mask_keeps_outside_workspace(self):
-        color, depth = synthetic_rgbd(self.camera, self.x_bc)
+        _color, depth = synthetic_rgbd(self.camera, self.x_bc)
         mask = static_mask(depth, self.camera, self.x_bc, self.bbox_min, self.bbox_max, self.cfg, 0.0)
         self.assertEqual(mask.shape, depth.shape)
         self.assertGreater(int((mask > 0).sum()), 5000)
@@ -153,7 +168,7 @@ class SceneLockTests(unittest.TestCase):
                          (self.bbox_min[1] + self.bbox_max[1]) / 2, 0.0]])
         mid_cam = transform_points(inv(self.x_bc), mid)
         mid_px = self.camera.project(mid_cam)
-        uu, vv = int(round(mid_px[0, 0])), int(round(mid_px[0, 1]))
+        uu, vv = round(mid_px[0, 0]), round(mid_px[0, 1])
         if 0 <= uu < w and 0 <= vv < h:
             depth[vv, uu] = float(mid_cam[0, 2])
             keep3 = filter_dynamic(base, mid_px, mid_cam, depth, self.cfg)

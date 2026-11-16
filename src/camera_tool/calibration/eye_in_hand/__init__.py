@@ -10,8 +10,8 @@ from camera_tool.calibration.eye_in_hand.solver import (
 from camera_tool.calibration.eye_in_hand.waypoints import WaypointPlanner
 
 __all__ = [
-    "CalibrationSession",
     "OPENCV_HAND_EYE_METHODS",
+    "CalibrationSession",
     "WaypointPlanner",
     "evaluate_board_geometry",
     "evaluate_depth_consistency",

@@ -4,7 +4,7 @@ set -euo pipefail
 RULE_FILE="/etc/udev/rules.d/99-obsensor-libusb.rules"
 
 if [[ "${EUID}" -ne 0 ]]; then
-    echo "请使用 sudo 运行此脚本：sudo bash $0" >&2
+    echo "Please run this script with sudo: sudo bash $0" >&2
     exit 1
 fi
 
@@ -17,5 +17,4 @@ EOF
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=usb --attr-match=idVendor=2bc5
 udevadm trigger --subsystem-match=hidraw
-echo "已安装并生效：${RULE_FILE}"
-
+echo "Installed and reloaded udev rules: ${RULE_FILE}"

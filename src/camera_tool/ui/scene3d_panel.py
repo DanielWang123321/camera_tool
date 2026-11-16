@@ -6,9 +6,18 @@ from typing import Any
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QVector3D
-from PySide6.QtWidgets import QApplication, QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from camera_tool.core import marker_object_points, transform_points, valid_transform
+from camera_tool.ui.i18n import DEFAULT_LANG, normalize_lang, tr
 
 try:
     import pyqtgraph.opengl as gl
@@ -28,16 +37,29 @@ class Scene3DPanel(QWidget):
         tool_length_m: float = 0.185,
         default_board_z_m: float = 0.0,
         parent: QWidget | None = None,
+        lang: str = DEFAULT_LANG,
     ) -> None:
         super().__init__(parent)
         self.marker_side_m = marker_side_m
         self.tool_length_m = tool_length_m
         self.default_board_z_m = default_board_z_m
+        self.lang = normalize_lang(lang)
         self.nominal_flange_cam = np.array(
             [[1, 0, 0, 0.045], [0, 1, 0, 0.0], [0, 0, 1, 0.062], [0, 0, 0, 1.0]], dtype=float
         )
         self._items: list[Any] = []
+        self._lbl_fallback: QLabel | None = None
         self._build_ui()
+
+    def set_language(self, lang: str) -> None:
+        self.lang = normalize_lang(lang)
+        self.lbl_title.setText(tr("scene3d.title", self.lang))
+        self.lbl_title.setToolTip(tr("scene3d.tooltip", self.lang))
+        self.chk_waypoints.setText(tr("scene3d.waypoints", self.lang))
+        self.chk_pointcloud.setText(tr("scene3d.pointcloud", self.lang))
+        self.btn_reset_cam.setText(tr("scene3d.reset", self.lang))
+        if self._lbl_fallback is not None:
+            self._lbl_fallback.setText(tr("scene3d.unavailable", self.lang))
 
     def configure(
         self,
@@ -58,15 +80,15 @@ class Scene3DPanel(QWidget):
         root.setSpacing(10)
 
         header = QHBoxLayout()
-        title = QLabel("基座坐标系")
-        title.setObjectName("muted")
-        title.setToolTip("坐标轴：X 红 / Y 绿 / Z 蓝；品红线：末端包络；黄框：标定板；青色点：预设点位。")
-        self.chk_waypoints = QCheckBox("点位")
+        self.lbl_title = QLabel(tr("scene3d.title", self.lang))
+        self.lbl_title.setObjectName("muted")
+        self.lbl_title.setToolTip(tr("scene3d.tooltip", self.lang))
+        self.chk_waypoints = QCheckBox(tr("scene3d.waypoints", self.lang))
         self.chk_waypoints.setChecked(True)
-        self.chk_pointcloud = QCheckBox("点云")
+        self.chk_pointcloud = QCheckBox(tr("scene3d.pointcloud", self.lang))
         self.chk_pointcloud.setChecked(True)
-        self.btn_reset_cam = QPushButton("重置视角")
-        header.addWidget(title)
+        self.btn_reset_cam = QPushButton(tr("scene3d.reset", self.lang))
+        header.addWidget(self.lbl_title)
         header.addStretch()
         header.addWidget(self.chk_waypoints)
         header.addWidget(self.chk_pointcloud)
@@ -83,9 +105,9 @@ class Scene3DPanel(QWidget):
             self._init_static_grid()
         else:
             self.gl_view = None
-            fallback = QLabel("OpenGL 视图不可用")
-            fallback.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            root.addWidget(fallback, stretch=1)
+            self._lbl_fallback = QLabel(tr("scene3d.unavailable", self.lang))
+            self._lbl_fallback.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            root.addWidget(self._lbl_fallback, stretch=1)
 
     def reset_camera_view(self) -> None:
         if self.gl_view is None:

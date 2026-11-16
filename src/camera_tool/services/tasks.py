@@ -1,15 +1,14 @@
 """Cooperative cancellation, bounded frame delivery and process-wide device leases."""
 from __future__ import annotations
 
-from contextlib import contextmanager
-from contextvars import ContextVar
 import fcntl
 import hashlib
 import os
-from pathlib import Path
 import tempfile
 import threading
-import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 
 
 class Cancelled(RuntimeError):
@@ -43,15 +42,13 @@ class TaskContext:
 
     def check(self):
         if self.cancelled.is_set():
-            raise Cancelled("任务已停止")
+            raise Cancelled("Task stopped")
 
     def sleep(self, seconds):
         self.cancelled.wait(seconds)
         self.check()
 
     def frame(self, name, data):
-        # A slow or hidden desktop consumes only the latest frame, without
-        # retaining an unbounded queue of full-resolution images in Qt signals.
         with self._frames_lock:
             self._frames[name] = data
 
@@ -85,7 +82,7 @@ class DeviceManager:
                     for held, held_owner in self._held:
                         hf, hs = held.split(":", 1)
                         if hf == family and (serial == "*" or hs == "*" or serial == hs):
-                            raise RuntimeError(f"设备 {key} 正由 {held_owner} 使用")
+                            raise RuntimeError(f"Device {key} is currently in use by {held_owner}")
                 for key in keys:
                     family, serial = key.split(":", 1)
                     family_file = (self.directory / f"{family}.lock").open("a")
@@ -100,10 +97,9 @@ class DeviceManager:
                 acquired = True
             yield
         except BlockingIOError as exc:
-            raise RuntimeError("所选设备正由另一个 camera-tool 任务使用") from exc
+            raise RuntimeError("Selected device is currently in use by another camera-tool task") from exc
         finally:
             with self._mutex:
-                # Only remove entries acquired by this invocation.
                 for key in keys:
                     if acquired and (key, owner) in self._held:
                         self._held.remove((key, owner))

@@ -20,8 +20,6 @@ def _run_driver(specification, config, packets, stop, ready, cleaning_up):
             try:
                 packets.put_nowait(("frame", frame))
             except queue.Full:
-                # Old UI frames can be discarded; acquisition and SDK errors
-                # remain independent of the main process's rendering rate.
                 try:
                     packets.get_nowait()
                     packets.put_nowait(("frame", frame))
@@ -57,8 +55,10 @@ class ProcessCamera:
                 return self.packets.get(timeout=.1)
             except queue.Empty:
                 if not self.process.is_alive():
-                    raise RuntimeError(f"相机 SDK 进程退出（{self.process.exitcode}）；请检查设备、SDK 和系统权限")
-        raise RuntimeError("相机 SDK 响应超时")
+                    raise RuntimeError(
+                        f"Camera SDK process exited (code={self.process.exitcode}); check device, SDK, and permissions"
+                    )
+        raise RuntimeError("Camera SDK response timed out")
 
     def start(self):
         context = mp.get_context("spawn")

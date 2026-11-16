@@ -36,6 +36,3 @@ def resource_path(path: str | Path) -> Path:
 def output_path(path: str | Path) -> Path:
     value = Path(path).expanduser()
     return (value if value.is_absolute() else DATA_ROOT / value).resolve()
-
-
-project_path = output_path

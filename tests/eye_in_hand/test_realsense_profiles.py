@@ -85,6 +85,6 @@ def test_warmup_failure_stops_pipeline_even_before_connected_flag(fake_rs):
 
 def test_missing_selected_serial_does_not_start_another_device(fake_rs):
     camera = RealSenseCamera({'serial': 'missing'})
-    with pytest.raises(CalibrationError, match='指定'):
+    with pytest.raises(CalibrationError, match='serial'):
         camera.start()
     assert not fake_rs.started

@@ -24,12 +24,12 @@ transform = make_transform
 def valid_transform(matrix: Any, atol: float = 1e-3) -> np.ndarray:
     m = np.asarray(matrix, dtype=float)
     if m.shape != (4, 4) or not np.isfinite(m).all():
-        raise CalibrationError("4x4 刚体变换矩阵包含无效数值或维度错误")
+        raise CalibrationError("4x4 rigid transform matrix has invalid shape or non-finite values")
     r = m[:3, :3]
     if not np.allclose(r.T @ r, np.eye(3), atol=atol) or abs(np.linalg.det(r) - 1.0) > atol:
-        raise CalibrationError("旋转矩阵不满足正交约束 SO(3)")
+        raise CalibrationError("Rotation matrix does not satisfy SO(3) orthogonality constraints")
     if not np.allclose(m[3], [0.0, 0.0, 0.0, 1.0], atol=1e-6):
-        raise CalibrationError("齐次变换矩阵底行必须为 [0, 0, 0, 1]")
+        raise CalibrationError("Homogeneous transform bottom row must be [0, 0, 0, 1]")
     return m.copy()
 
 
@@ -72,7 +72,7 @@ def pose_from_mm_deg(pose_mm_deg: list[float] | np.ndarray) -> np.ndarray:
     """Convert [x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg] (extrinsic 'xyz') to 4x4 meters."""
     p = np.asarray(pose_mm_deg, dtype=float)
     if p.size != 6 or not np.isfinite(p).all():
-        raise CalibrationError("位姿数组包含非有限值或维度无效")
+        raise CalibrationError("Pose array has invalid size or non-finite values")
     p = p.reshape(6)
     rot = Rotation.from_euler("xyz", p[3:], degrees=True).as_matrix()
     return make_transform(rot, p[:3] / 1000.0)
@@ -89,7 +89,7 @@ def pose_from_mm_rad(pose_mm_rad: list[float] | np.ndarray) -> np.ndarray:
     """Convert [x_mm, y_mm, z_mm, roll_rad, pitch_rad, yaw_rad] to 4x4 meters."""
     p = np.asarray(pose_mm_rad, dtype=float)
     if p.size != 6 or not np.isfinite(p).all():
-        raise CalibrationError("控制器位姿数据无效")
+        raise CalibrationError("Invalid controller pose data")
     p = p.reshape(6)
     rot = Rotation.from_euler("xyz", p[3:], degrees=False).as_matrix()
     return make_transform(rot, p[:3] / 1000.0)
@@ -158,8 +158,8 @@ def check_tool_safety(
         high = np.asarray(workspace_max_m, dtype=float)
         if np.any(pos < low - 1e-6) or np.any(pos > high + 1e-6):
             raise RejectedSample(
-                f"法兰位置超出安全工作区: {np.round(pos * 1000, 1).tolist()} mm "
-                f"(允许范围 {np.round(low * 1000, 0).tolist()} ~ {np.round(high * 1000, 0).tolist()} mm)"
+                f"Flange position outside safe workspace: {np.round(pos * 1000, 1).tolist()} mm "
+                f"(allowed {np.round(low * 1000, 0).tolist()} ~ {np.round(high * 1000, 0).tolist()} mm)"
             )
 
     length_m = float(tool_cfg.get("length_m", 0.185))
@@ -172,15 +172,15 @@ def check_tool_safety(
     tip_z = tool_lowest_z_m(m, length_m, radius_m)
     clearance_m = tip_z - table_z_m
 
-    tool_name = str(tool_cfg.get("name", "末端工具"))
+    tool_name = str(tool_cfg.get("name", "End-effector tool"))
     if flange_z < min_flange_z_m - 1e-6:
         raise RejectedSample(
-            f"法兰高度过低 ({flange_z * 1000:.1f} mm < {min_flange_z_m * 1000:.1f} mm)，触发防撞保护"
+            f"Flange Z height too low ({flange_z * 1000:.1f} mm < {min_flange_z_m * 1000:.1f} mm); collision guard triggered"
         )
     if clearance_m < min_tip_z_m - 1e-6:
         raise RejectedSample(
-            f"{tool_name}最低点距桌面过近 ({clearance_m * 1000:.1f} mm < {min_tip_z_m * 1000:.1f} mm)，"
-            "已拦截以防碰撞桌面"
+            f"{tool_name} lowest point too close to table ({clearance_m * 1000:.1f} mm < {min_tip_z_m * 1000:.1f} mm); "
+            "rejected to prevent table collision"
         )
     return {
         "flange_z_mm": flange_z * 1000.0,
@@ -223,7 +223,7 @@ def rotation_coverage(
 ) -> list[float]:
     """Compute 3-axis rotational excitation RMS in degrees via SVD of relative rotation vectors."""
     if len(poses_or_samples) < 4:
-        raise CalibrationError(f"有效样本数量不足 ({len(poses_or_samples)} < 4)")
+        raise CalibrationError(f"Insufficient active samples ({len(poses_or_samples)} < 4)")
     mats: list[np.ndarray] = []
     for item in poses_or_samples:
         if isinstance(item, dict):
@@ -237,7 +237,8 @@ def rotation_coverage(
     rms_deg = np.rad2deg(singular / np.sqrt(len(mats)))
     if len(rms_deg) < 2 or rms_deg[1] < minimum_deg:
         raise CalibrationError(
-            f"机械臂多轴转动不足或只有一个转轴（第二方向幅度 {rms_deg[1]:.1f}° < 阈值 {minimum_deg:g}°）"
+            f"Insufficient multi-axis robot rotation or single-axis excitation "
+            f"(2nd-axis RMS {rms_deg[1]:.1f} deg < {minimum_deg:g} deg)"
         )
     return [float(x) for x in rms_deg]
 
@@ -254,12 +255,12 @@ def nearest_continuous_joints(
     q_raw = np.asarray(joints, dtype=float).ravel()[:dof]
     lim = np.asarray(limits, dtype=float)[:dof]
     if len(q_raw) != dof or not np.isfinite(q_raw).all():
-        raise RejectedSample("逆运动学返回关节角包含非有限值或维度不匹配")
+        raise RejectedSample("IK returned non-finite joint angles or mismatched DOF")
     out: list[float] = []
     for q, r, (low, high) in zip(q_raw, ref, lim):
         candidates = q + np.arange(-2, 3) * 2.0 * np.pi
         valid = candidates[(candidates >= low + margin_rad) & (candidates <= high - margin_rad)]
         if len(valid) == 0:
-            raise RejectedSample("逆解关节角过于接近软限位")
+            raise RejectedSample("IK joint angle too close to soft joint limits")
         out.append(float(valid[np.argmin(np.abs(valid - r))]))
     return np.asarray(out, dtype=float)

@@ -54,26 +54,26 @@ def open_uvc_capture(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     devices = list_uvc_devices(prefix, suffix)
     if not serial:
         if not devices:
-            raise RuntimeError(f"未检测到匹配的 UVC 相机节点（{BY_ID_DIR}）。")
+            raise RuntimeError(f"No matching UVC camera node found in {BY_ID_DIR}.")
         if len(devices) > 1:
             found = ", ".join(sn for sn, _, _ in devices)
-            raise RuntimeError(f"检测到多个 UVC 相机（{found}），请指定序列号。")
+            raise RuntimeError(f"Multiple UVC cameras detected ({found}); specify a serial number.")
         serial, path, _ = devices[0]
     else:
         path = BY_ID_DIR / f"{prefix}{serial}{suffix}"
         if not path.exists():
             extra = (
-                f" 当前已连接：{', '.join(sn for sn, _, _ in devices)}"
+                f" Connected: {', '.join(sn for sn, _, _ in devices)}"
                 if devices
-                else f" 未检测到任何匹配的 by-id 节点（{BY_ID_DIR}）。"
+                else f" No matching by-id nodes found in {BY_ID_DIR}."
             )
-            raise RuntimeError(f"未找到序列号 {serial} 的 UVC 相机：{path} 不存在。{extra}")
+            raise RuntimeError(f"UVC camera with serial {serial} not found: {path} does not exist.{extra}")
 
     cap = cv2.VideoCapture(str(path), cv2.CAP_V4L2)
     if not cap.isOpened():
         raise RuntimeError(
-            f"无法打开 {path}（解析为 {path.resolve()}）。"
-            "请确认相机未被其他程序占用，且节点仍绑定 uvcvideo。"
+            f"Cannot open {path} (resolved to {path.resolve()}). "
+            "Ensure the camera is not in use by another process and remains bound to uvcvideo."
         )
 
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
@@ -86,17 +86,17 @@ def open_uvc_capture(config: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     actual_fps = float(cap.get(cv2.CAP_PROP_FPS))
     if actual_w != width or actual_h != height:
         cap.release()
-        raise RuntimeError(f"无法以 {width}x{height} 开流，设备回报 {actual_w}x{actual_h}。")
+        raise RuntimeError(f"Failed to open stream at {width}x{height}; device reported {actual_w}x{actual_h}.")
 
     frame = None
     for _ in range(max(warmup_frames, 1)):
         ok, frame = cap.read()
         if not ok or frame is None:
             cap.release()
-            raise RuntimeError(f"预热取流失败：{path} 在 {warmup_frames} 帧内没有有效画面。")
+            raise RuntimeError(f"Warmup stream failed: {path} produced no valid frame within {warmup_frames} reads.")
     if frame.ndim != 3 or frame.shape[2] != 3:
         cap.release()
-        raise RuntimeError(f"预热帧格式异常：shape={getattr(frame, 'shape', None)}，期望 BGR 三通道。")
+        raise RuntimeError(f"Unexpected warmup frame format: shape={getattr(frame, 'shape', None)}, expected 3-channel BGR.")
 
     metadata = {
         "serial": serial,
@@ -127,10 +127,10 @@ class UvcSession:
 
     def read(self) -> dict[str, Any]:
         if self.cap is None:
-            raise RuntimeError("UVC 相机未启动")
+            raise RuntimeError("UVC camera is not started")
         ok, image = self.cap.read()
         if not ok or image is None:
-            raise RuntimeError("UVC 相机断流")
+            raise RuntimeError("UVC camera stream interrupted")
         self.sequence += 1
         return {
             "color_bgr": image,
@@ -144,8 +144,6 @@ class UvcSession:
         if self.cap is not None:
             self.cap.release()
             self.cap = None
-
-    close = stop
 
 
 class UvcCamera(ProcessCamera):

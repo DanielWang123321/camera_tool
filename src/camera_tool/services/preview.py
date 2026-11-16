@@ -5,7 +5,7 @@ from camera_tool.services.tasks import DEVICES
 
 def preview(context, kind, config):
     camera = create_camera(kind, config)
-    with DEVICES.lease([device_resource(kind, config.get("serial", ""))], "相机预览"):
+    with DEVICES.lease([device_resource(kind, config.get("serial", ""))], "Camera Preview"):
         try:
             context.check()
             metadata = dict(camera.start())

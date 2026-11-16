@@ -11,7 +11,7 @@ Unified camera preview, Hand-Eye calibration (**Eye-in-Hand** & **Eye-to-Hand**)
 - **Eye-to-Hand Calibration**: Chains a wrist-mounted camera with a fixed RGB-D camera over a shared tabletop ArUco marker, enforcing hold-out pose verification and depth scale estimation before publishing extrinsics.
 - **Offline Session Replay**: Recomputes recorded sessions and updates Eye-in-Hand tool TCP offsets (`--tcp-offset`) without importing hardware SDKs or Qt.
 - **Diagnostics**: Scene-locked tripod displacement detection (`OK` / `WARN` / `FAIL`) and Linux `sysfs` USB 3.x link speed & frame-drop stability testing.
-- **Desktop GUI & Headless CLI**: Five-page PySide6 dark desktop interface alongside scriptable, non-GUI CLI subcommands protected by cross-process device leases.
+- **Desktop GUI & Headless CLI**: Five-page PySide6 dark desktop interface (English by default with live **EN / 中文** toggle) alongside scriptable, non-GUI CLI subcommands protected by cross-process device leases.
 
 ## Project Structure
 
@@ -21,9 +21,8 @@ src/camera_tool/
 ├── devices/        # Generic backends (realsense, orbbec, uvc, sim), process isolation, robot controllers
 ├── calibration/    # Eye-in-Hand and Eye-to-Hand solvers, waypoint planners, and workflows
 ├── diagnostics/    # Tripod scene-lock monitoring and Linux sysfs USB link inspection
-├── maintenance/    # Wrist intrinsics export, pointer corner calibration, and extrinsics verification
 ├── services/       # Qt-free task orchestration and cross-process device lease manager
-├── ui/             # Five-page PySide6 desktop interface and 3D OpenGL scene viewer
+├── ui/             # Five-page PySide6 desktop interface, EN/ZH i18n, and 3D OpenGL scene viewer
 └── resources/      # Parameterized YAML templates, udev helper script, and native C++ bridge source
 ```
 
@@ -50,8 +49,9 @@ pip install -e ".[realsense,orbbec,robot,dev]"
 ### 1. Desktop Interface
 
 ```bash
-camera-tool          # Launch 5-page desktop GUI
-camera-tool --sim    # Launch desktop GUI in offline simulation mode
+camera-tool                     # Launch 5-page desktop GUI (English by default)
+camera-tool --sim               # Launch desktop GUI in offline simulation mode
+CAMERA_TOOL_LANG=zh camera-tool # Start desktop GUI in Chinese (or toggle EN / 中文 in top bar)
 ```
 
 ### 2. Camera Discovery & Preview
@@ -76,6 +76,9 @@ camera-tool calibrate --mode eye-in-hand --preset default --robot-ip <ROBOT_IP> 
 
 # Full automatic Eye-in-Hand calibration (presets: default, medium_range, orbbec)
 camera-tool calibrate --mode eye-in-hand --preset medium_range --robot-ip <ROBOT_IP>
+
+# Export wrist camera undistortion map for Eye-to-Hand (from device or recorded run)
+camera-tool wrist-intrinsics
 
 # Full Eye-to-Hand calibration
 camera-tool calibrate --mode eye-to-hand --robot-ip <ROBOT_IP>
@@ -113,7 +116,7 @@ camera-tool usb-test --backend realsense --duration 1800 --interval 5 --csv usb_
   - `eye_in_hand/medium_range.yaml` — Medium-range flange bracket preset (`waypoints/medium_range.yaml`).
   - `eye_in_hand/orbbec.yaml` — `1280x800@30` Orbbec RGB-D preset.
   - `eye_in_hand/waypoints/profiles.yaml` — Kinematic workspace profiles (`arm_6dof`, `arm_5dof`, `arm_7dof`, `arm_compact_6dof`, `arm_long_6dof`).
-  - `eye_to_hand.yaml` & `corners.yaml` — Eye-to-Hand and TCP pointer corner calibration templates.
+  - `eye_to_hand.yaml` — Eye-to-Hand calibration template.
 - **Hardware Neutrality**: All tracked templates leave `serial: ""` and `robot.ip: ""`. Single-device setups auto-select the connected camera; multi-camera setups can pass `--serial <SN>` or override YAML configs locally.
 - **Local Runtime Directories**: Session recordings (`runs/`), published extrinsics (`result/`), and device-specific wrist intrinsics (`intrinsics/wrist_<SERIAL>.json`) are stored locally and excluded from version control.
 

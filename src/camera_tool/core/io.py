@@ -4,9 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import cv2
 import numpy as np
@@ -27,7 +28,7 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     target = resource_path(path)
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise CalibrationError(f"配置文件格式无效: {path}")
+        raise CalibrationError(f"Invalid YAML config format: {path}")
     return data
 
 
@@ -98,14 +99,14 @@ class Session:
         row = {"time": datetime.now().astimezone().isoformat(), "event": event, **fields}
         with (self.path / "events.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False, default=json_default, allow_nan=False) + "\n")
-        print(event + (f"：{fields['reason']}" if "reason" in fields else ""), flush=True)
+        print(event + (f": {fields['reason']}" if "reason" in fields else ""), flush=True)
         if self.on_event:
             self.on_event(row, self.manifest)
 
     def image(self, name: str, array: np.ndarray) -> str:
         target = output_path(self.path / name)
         if not cv2.imwrite(str(target), array):
-            raise CalibrationError(f"图像保存失败：{target}")
+            raise CalibrationError(f"Failed to save image: {target}")
         return name
 
     def finish(self, status: str, **fields: Any) -> None:

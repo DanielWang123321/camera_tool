@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -42,6 +42,7 @@ from camera_tool.services.eye_in_hand import (
 )
 from camera_tool.services.replay import load_session
 from camera_tool.ui.calibration_panel import CalibrationPanel
+from camera_tool.ui.i18n import LANG_OPTIONS, normalize_lang, resolve_initial_lang, tr
 from camera_tool.ui.scene3d_panel import Scene3DPanel
 from camera_tool.ui.tasks import TaskWorker
 from camera_tool.ui.theme import STYLE
@@ -49,9 +50,17 @@ from camera_tool.ui.video_panel import ImagePreview, VideoPanel, colorize_depth
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, sim_mode=False, replay_dir=None, initial_page=0, initial_mode="eye-in-hand"):
+    def __init__(
+        self,
+        sim_mode=False,
+        replay_dir=None,
+        initial_page=0,
+        initial_mode="eye-in-hand",
+        lang=None,
+    ):
         super().__init__()
-        self.setWindowTitle("camera_tool · 相机与手眼标定")
+        self.lang = normalize_lang(lang) if lang is not None else resolve_initial_lang()
+        self.setWindowTitle(tr("window.title", self.lang))
         self.setMinimumSize(1080, 640)
         self.resize(1440, 900)
         self.setStyleSheet(STYLE)
@@ -63,6 +72,13 @@ class MainWindow(QMainWindow):
         self._command_busy = False
         self._last_preview = None
         self._last_metadata = None
+        self._last_usb_row = None
+        self._last_usb_final = False
+        self._last_tripod = None
+        self._last_safety = None
+        self._last_progress = None
+        self._last_scan_payload = None
+        self._status_key = ("status.ready", {})
         self._selected_mode = initial_mode
         self._build_ui(sim_mode, initial_mode)
         self.frame_timer = QTimer(self)
@@ -87,8 +103,9 @@ class MainWindow(QMainWindow):
         top.addWidget(title)
         self.navigation = QButtonGroup(self)
         self.nav_buttons = []
-        for index, text in enumerate(("相机预览", "手眼标定", "结果与回放", "三脚架检测", "USB 稳定性测试")):
-            button = QPushButton(text)
+        self._nav_keys = ("nav.preview", "nav.calibration", "nav.results", "nav.tripod", "nav.usb")
+        for index, key in enumerate(self._nav_keys):
+            button = QPushButton(tr(key, self.lang))
             button.setObjectName("nav")
             button.setCheckable(True)
             self.navigation.addButton(button, index)
@@ -96,6 +113,15 @@ class MainWindow(QMainWindow):
             top.addWidget(button)
         self.navigation.idClicked.connect(self._navigate)
         top.addStretch()
+        self.combo_lang = QComboBox()
+        self.combo_lang.setObjectName("langSwitch")
+        for code, label in LANG_OPTIONS:
+            self.combo_lang.addItem(label, code)
+        lang_idx = self.combo_lang.findData(self.lang)
+        if lang_idx >= 0:
+            self.combo_lang.setCurrentIndex(lang_idx)
+        self.combo_lang.currentIndexChanged.connect(lambda: self.set_language(self.combo_lang.currentData()))
+        top.addWidget(self.combo_lang)
         root.addLayout(top)
         self.pages = QStackedWidget()
         root.addWidget(self.pages, 1)
@@ -107,7 +133,7 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.status_bar.setSizeGripEnabled(False)
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪 · 选择功能后启动设备")
+        self._status_tr("status.ready")
 
     @staticmethod
     def _button(text, layout, slot, primary=False):
@@ -118,6 +144,153 @@ class MainWindow(QMainWindow):
         layout.addWidget(button)
         return button
 
+    def set_language(self, lang):
+        target = normalize_lang(lang)
+        self.lang = target
+        with QSignalBlocker(self.combo_lang):
+            idx = self.combo_lang.findData(target)
+            if idx >= 0:
+                self.combo_lang.setCurrentIndex(idx)
+        self._retranslate_ui()
+
+    def _retranslate_ui(self):
+        self.setWindowTitle(tr("window.title", self.lang))
+        for button, key in zip(self.nav_buttons, self._nav_keys):
+            button.setText(tr(key, self.lang))
+
+        available = availability()
+        with QSignalBlocker(self.combo_camera):
+            for idx, (backend, (name, sdk)) in enumerate(BACKENDS.items()):
+                suffix = "" if available[backend] else tr("preview.missing_sdk", self.lang, sdk=sdk)
+                self.combo_camera.setItemText(idx, name + suffix)
+
+        self.combo_device.setPlaceholderText(tr("preview.serial_placeholder", self.lang))
+        self.chk_depth.setText(tr("preview.enable_depth", self.lang))
+        with QSignalBlocker(self.combo_view):
+            self.combo_view.setItemText(0, tr("preview.view_color", self.lang))
+            self.combo_view.setItemText(1, tr("preview.view_depth", self.lang))
+        self.btn_scan.setText(tr("preview.discover", self.lang))
+        self.btn_preview_start.setText(tr("preview.start", self.lang))
+        self.btn_preview_stop.setText(tr("preview.stop", self.lang))
+        self.chk_crosshair.setText(tr("preview.crosshair", self.lang))
+
+        if self._last_metadata is not None:
+            self._update_preview_meta_label(self._last_metadata)
+        elif self._last_scan_payload is not None:
+            self._update_scan_label(self._last_scan_payload)
+        else:
+            self.preview_info.setText(tr("preview.info_default", self.lang))
+        if self._last_preview is not None:
+            self._render_preview()
+        else:
+            self.preview_distance.setText(tr("preview.distance_empty", self.lang))
+            self.preview_image.setText(tr("preview.placeholder", self.lang))
+
+        with QSignalBlocker(self.combo_mode):
+            self.combo_mode.setItemText(0, tr("cal.mode_eih", self.lang))
+            self.combo_mode.setItemText(1, tr("cal.mode_eth", self.lang))
+        with QSignalBlocker(self.combo_eih_backend):
+            self.combo_eih_backend.setItemText(0, tr("cal.backend_auto", self.lang))
+            self.combo_eih_backend.setItemText(1, tr("cal.backend_realsense", self.lang))
+            self.combo_eih_backend.setItemText(2, tr("cal.backend_orbbec", self.lang))
+        with QSignalBlocker(self.combo_eih_preset):
+            self.combo_eih_preset.setItemText(0, tr("cal.preset_auto", self.lang))
+            self.combo_eih_preset.setItemText(1, tr("cal.preset_default", self.lang))
+            self.combo_eih_preset.setItemText(2, tr("cal.preset_medium", self.lang))
+            self.combo_eih_preset.setItemText(3, tr("cal.preset_orbbec", self.lang))
+
+        self.chk_sim.setText(tr("cal.sim", self.lang))
+        self.lbl_robot_ip.setText(tr("cal.robot_ip", self.lang))
+        self.cal_robot_ip.setPlaceholderText(tr("cal.robot_ip_placeholder", self.lang))
+        is_eih = self.combo_mode.currentData() == "eye-in-hand"
+        self.btn_connect.setText(tr("cal.connect" if is_eih else "cal.start_full", self.lang))
+        self.btn_check.setText(tr("cal.check", self.lang))
+        self.btn_cal_stop.setText(tr("cal.stop", self.lang))
+        self.lbl_cal_config.setText(tr("cal.config_file", self.lang))
+        if self.wrist_image.image_bgr is None:
+            self.wrist_image.setText(tr("cal.wrist_placeholder", self.lang))
+        if self.fixed_image.image_bgr is None:
+            self.fixed_image.setText(tr("cal.fixed_placeholder", self.lang))
+        self.btn_view.setText(tr("cal.btn_view", self.lang))
+        self.btn_capture.setText(tr("cal.btn_capture", self.lang))
+        self.btn_next.setText(tr("cal.btn_next", self.lang))
+        self.btn_recenter.setText(tr("cal.btn_recenter", self.lang))
+        self.btn_auto.setText(tr("cal.btn_auto", self.lang))
+        self.btn_solve_capture.setText(tr("cal.btn_solve", self.lang))
+        self.btn_clear.setText(tr("cal.btn_clear", self.lang))
+
+        if self._last_safety is not None:
+            self.safety_status.setText(
+                tr(
+                    "cal.safety_fmt",
+                    self.lang,
+                    clearance=self._last_safety.get("table_clearance_mm", 0),
+                    message=self._last_safety.get("message", tr("report.unknown", self.lang)),
+                )
+            )
+        elif "calibration" not in self.workers:
+            self.safety_status.setText(tr("cal.safety_unknown", self.lang))
+
+        if self._last_progress is not None:
+            self.cal_stage.setText(
+                tr(
+                    "cal.stage_eth_progress",
+                    self.lang,
+                    stage=self._last_progress["stage"],
+                    samples=len(self._last_progress["samples"]),
+                    fixed=self._last_progress["fixed_count"],
+                )
+            )
+        elif self.payload is None:
+            self.cal_stage.setText(tr("cal.stage_default_eih" if is_eih else "cal.stage_default_eth", self.lang))
+
+        self.video_panel.set_language(self.lang)
+        self.scene3d_panel.set_language(self.lang)
+        self.result_panel.set_language(self.lang)
+        if self.payload is not None and self.payload.get("mode") == "eye-in-hand":
+            samples = self.payload.get("samples", [])
+            self.cal_stage.setText(
+                tr(
+                    "cal.stage_eih_counts",
+                    self.lang,
+                    active=sum(s.get("enabled", True) for s in samples),
+                    total=len(samples),
+                    index=self.payload.get("index", -1) + 1,
+                )
+            )
+            if self.payload.get("error"):
+                self.result_panel.txt_report.setPlainText(self.payload["error"])
+
+        self.replay_path.setPlaceholderText(tr("results.placeholder", self.lang))
+        self.btn_replay.setText(tr("results.open", self.lang))
+
+        self.lbl_tripod_cfg.setText(tr("tripod.cfg_label", self.lang))
+        self.lbl_tripod_result.setText(tr("tripod.result_label", self.lang))
+        self.lbl_tripod_baseline.setText(tr("tripod.baseline_label", self.lang))
+        self.btn_lock.setText(tr("tripod.lock", self.lang))
+        self.btn_watch.setText(tr("tripod.watch", self.lang))
+        self.btn_tripod_stop.setText(tr("tripod.stop", self.lang))
+        if self._last_tripod is not None:
+            self._update_tripod_metric(self._last_tripod)
+        else:
+            self.tripod_metric.setText(tr("tripod.metric_default", self.lang))
+        if self.tripod_image.image_bgr is None:
+            self.tripod_image.setText(tr("tripod.placeholder", self.lang))
+
+        for lbl, key in self._usb_form_labels:
+            lbl.setText(tr(key, self.lang))
+        self.btn_usb_start.setText(tr("usb.start", self.lang))
+        self.btn_usb_stop.setText(tr("usb.stop", self.lang))
+        self.btn_usb_export.setText(tr("usb.export", self.lang))
+        if self._last_usb_row is not None:
+            self.usb_metric.setText(self._format_usb_text(self._last_usb_row))
+        else:
+            self.usb_metric.setText(tr("usb.metric_default", self.lang))
+
+        if self._status_key is not None:
+            key, kwargs = self._status_key
+            self._status_tr(key, **kwargs)
+
     def _build_preview(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -125,20 +298,21 @@ class MainWindow(QMainWindow):
         self.combo_camera = QComboBox()
         available = availability()
         for backend, (name, sdk) in BACKENDS.items():
-            self.combo_camera.addItem(name + ("" if available[backend] else f"（缺少 {sdk}）"), backend)
+            suffix = "" if available[backend] else tr("preview.missing_sdk", self.lang, sdk=sdk)
+            self.combo_camera.addItem(name + suffix, backend)
             self.combo_camera.model().item(self.combo_camera.count() - 1).setEnabled(available[backend])
         if any(available.values()):
             self.combo_camera.setCurrentIndex(next(i for i, b in enumerate(BACKENDS) if available[b]))
         self.combo_device = QComboBox()
         self.combo_device.setEditable(True)
         self.combo_device.setMinimumWidth(170)
-        self.combo_device.setPlaceholderText("序列号；空值自动选择")
+        self.combo_device.setPlaceholderText(tr("preview.serial_placeholder", self.lang))
         self.combo_profile = QComboBox()
         self.combo_profile.setEditable(True)
-        self.chk_depth = QCheckBox("开启深度")
+        self.chk_depth = QCheckBox(tr("preview.enable_depth", self.lang))
         self.chk_depth.setChecked(True)
         self.combo_view = QComboBox()
-        self.combo_view.addItems(["彩色", "深度"])
+        self.combo_view.addItems([tr("preview.view_color", self.lang), tr("preview.view_depth", self.lang)])
         self.max_depth = QDoubleSpinBox()
         self.max_depth.setRange(0.1, 20.0)
         self.max_depth.setValue(4.0)
@@ -152,23 +326,23 @@ class MainWindow(QMainWindow):
             self.max_depth,
         ):
             controls.addWidget(widget)
-        self.btn_scan = self._button("发现设备", controls, self.scan_devices)
-        self.btn_preview_start = self._button("启动", controls, self.start_preview, True)
-        self.btn_preview_stop = self._button("停止", controls, lambda: self.stop_task("preview"))
+        self.btn_scan = self._button(tr("preview.discover", self.lang), controls, self.scan_devices)
+        self.btn_preview_start = self._button(tr("preview.start", self.lang), controls, self.start_preview, True)
+        self.btn_preview_stop = self._button(tr("preview.stop", self.lang), controls, lambda: self.stop_task("preview"))
         layout.addLayout(controls)
-        self.preview_info = QLabel("彩色与深度在同一预览区切换。流规格按实际设备能力协商。")
+        self.preview_info = QLabel(tr("preview.info_default", self.lang))
         self.preview_info.setWordWrap(True)
         layout.addWidget(self.preview_info)
         info_bar = QHBoxLayout()
-        self.chk_crosshair = QCheckBox("中心十字线")
+        self.chk_crosshair = QCheckBox(tr("preview.crosshair", self.lang))
         self.chk_crosshair.setChecked(True)
         self.chk_crosshair.toggled.connect(self._render_preview)
-        self.preview_distance = QLabel("中心距离 — m")
+        self.preview_distance = QLabel(tr("preview.distance_empty", self.lang))
         info_bar.addWidget(self.chk_crosshair)
         info_bar.addWidget(self.preview_distance)
         info_bar.addStretch()
         layout.addLayout(info_bar)
-        self.preview_image = ImagePreview("启动相机后显示画面")
+        self.preview_image = ImagePreview(tr("preview.placeholder", self.lang))
         layout.addWidget(self.preview_image, 1)
         self.pages.addWidget(page)
         self.combo_camera.currentIndexChanged.connect(self._camera_changed)
@@ -189,14 +363,21 @@ class MainWindow(QMainWindow):
         self.combo_device.clear()
         self.combo_device.setEditText("")
 
+    def _update_scan_label(self, payload):
+        sep = "; " if self.lang == "en" else "；"
+        self.preview_info.setText(
+            sep.join(payload["errors"]) or tr("preview.devices_found", self.lang, count=len(payload["devices"]))
+        )
+
     def scan_devices(self):
         from camera_tool.devices.registry import discover
 
         def completed(payload):
+            self._last_scan_payload = payload
             backend = self.combo_camera.currentData()
             self.combo_device.clear()
             self.combo_device.addItems([d["serial"] for d in payload["devices"] if d["kind"] == backend])
-            self.preview_info.setText("；".join(payload["errors"]) or f"发现 {len(payload['devices'])} 个设备")
+            self._update_scan_label(payload)
 
         self.run_task("scan", lambda context: discover(), completed)
 
@@ -208,7 +389,7 @@ class MainWindow(QMainWindow):
             if min(width, height, fps) <= 0:
                 raise ValueError()
         except ValueError as exc:
-            raise ValueError("流规格格式应为 1280x720@30") from exc
+            raise ValueError(tr("status.invalid_profile_fmt", self.lang)) from exc
         return {
             "serial": self.combo_device.currentText().strip(),
             "width": width,
@@ -235,31 +416,31 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         bar = QHBoxLayout()
         self.combo_mode = QComboBox()
-        self.combo_mode.addItem("眼在手上 (Eye-in-Hand)", "eye-in-hand")
-        self.combo_mode.addItem("眼在手外 (Eye-to-Hand)", "eye-to-hand")
+        self.combo_mode.addItem(tr("cal.mode_eih", self.lang), "eye-in-hand")
+        self.combo_mode.addItem(tr("cal.mode_eth", self.lang), "eye-to-hand")
         self.combo_mode.setCurrentIndex(0 if mode == "eye-in-hand" else 1)
 
         self.combo_eih_backend = QComboBox()
-        self.combo_eih_backend.addItem("自动识别后端", "auto")
-        self.combo_eih_backend.addItem("RealSense RGB-D", "realsense")
-        self.combo_eih_backend.addItem("Orbbec RGB-D", "orbbec")
+        self.combo_eih_backend.addItem(tr("cal.backend_auto", self.lang), "auto")
+        self.combo_eih_backend.addItem(tr("cal.backend_realsense", self.lang), "realsense")
+        self.combo_eih_backend.addItem(tr("cal.backend_orbbec", self.lang), "orbbec")
         if not sim:
             detected = detect_usb_camera_backend()
             idx = self.combo_eih_backend.findData(detected)
             self.combo_eih_backend.setCurrentIndex(idx if idx >= 0 else 0)
 
         self.combo_eih_preset = QComboBox()
-        self.combo_eih_preset.addItem("自动模板", "auto")
-        self.combo_eih_preset.addItem("近距模板 (default)", "default")
-        self.combo_eih_preset.addItem("中距模板 (medium_range)", "medium_range")
-        self.combo_eih_preset.addItem("Orbbec 模板 (orbbec)", "orbbec")
+        self.combo_eih_preset.addItem(tr("cal.preset_auto", self.lang), "auto")
+        self.combo_eih_preset.addItem(tr("cal.preset_default", self.lang), "default")
+        self.combo_eih_preset.addItem(tr("cal.preset_medium", self.lang), "medium_range")
+        self.combo_eih_preset.addItem(tr("cal.preset_orbbec", self.lang), "orbbec")
 
-        self.chk_sim = QCheckBox("离线仿真")
+        self.chk_sim = QCheckBox(tr("cal.sim", self.lang))
         self.chk_sim.setChecked(sim)
-        self.lbl_robot_ip = QLabel("机械臂 IP")
+        self.lbl_robot_ip = QLabel(tr("cal.robot_ip", self.lang))
         self.cal_robot_ip = QLineEdit()
         self.cal_robot_ip.setMaximumWidth(165)
-        self.cal_robot_ip.setPlaceholderText("例如 192.168.x.x / XARM_IP")
+        self.cal_robot_ip.setPlaceholderText(tr("cal.robot_ip_placeholder", self.lang))
         self.cal_robot_ip.textEdited.connect(self._on_ip_edited)
 
         bar.addWidget(self.combo_mode)
@@ -269,35 +450,36 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.lbl_robot_ip)
         bar.addWidget(self.cal_robot_ip)
         bar.addStretch(1)
-        self.btn_connect = self._button("连接设备", bar, self.start_calibration, True)
-        self.btn_check = self._button("只读检查", bar, lambda: self.start_calibration(check=True))
-        self.btn_cal_stop = self._button("停止并释放设备", bar, lambda: self.stop_task("calibration"))
+        self.btn_connect = self._button(tr("cal.connect", self.lang), bar, self.start_calibration, True)
+        self.btn_check = self._button(tr("cal.check", self.lang), bar, lambda: self.start_calibration(check=True))
+        self.btn_cal_stop = self._button(tr("cal.stop", self.lang), bar, lambda: self.stop_task("calibration"))
         layout.addLayout(bar)
 
         cfg_bar = QHBoxLayout()
-        cfg_bar.addWidget(QLabel("配置文件"))
+        self.lbl_cal_config = QLabel(tr("cal.config_file", self.lang))
+        cfg_bar.addWidget(self.lbl_cal_config)
         self.cal_config = QLineEdit(
             str(config_path("eye_in_hand/default.yaml" if mode == "eye-in-hand" else "eye_to_hand.yaml"))
         )
         cfg_bar.addWidget(self.cal_config, 1)
         layout.addLayout(cfg_bar)
 
-        self.cal_stage = QLabel("眼在手上：连接设备后可手动采集、走预设点位或自动采集并求解。")
+        self.cal_stage = QLabel(tr("cal.stage_default_eih", self.lang))
         self.cal_stage.setWordWrap(True)
         layout.addWidget(self.cal_stage)
 
         self.capture_views = QStackedWidget()
         self.video_panel = VideoPanel(
-            cfg["marker"], tool_cfg, float(cfg["camera"].get("max_depth_m", 0.80))
+            cfg["marker"], tool_cfg, float(cfg["camera"].get("max_depth_m", 0.80)), lang=self.lang
         )
         self.capture_views.addWidget(self.video_panel)
         self.scene3d_panel = Scene3DPanel(
-            float(cfg["marker"]["side_m"]), float(tool_cfg.get("length_m", 0.185))
+            float(cfg["marker"]["side_m"]), float(tool_cfg.get("length_m", 0.185)), lang=self.lang
         )
         self.capture_views.addWidget(self.scene3d_panel)
         dual = QSplitter(Qt.Orientation.Horizontal)
-        self.wrist_image = ImagePreview("腕部相机 · 等待画面")
-        self.fixed_image = ImagePreview("固定相机 · 等待画面")
+        self.wrist_image = ImagePreview(tr("cal.wrist_placeholder", self.lang))
+        self.fixed_image = ImagePreview(tr("cal.fixed_placeholder", self.lang))
         dual.addWidget(self.wrist_image)
         dual.addWidget(self.fixed_image)
         self.capture_views.addWidget(dual)
@@ -305,16 +487,18 @@ class MainWindow(QMainWindow):
 
         actions = QHBoxLayout()
         self.btn_view = self._button(
-            "相机 / 3D", actions, lambda: self.capture_views.setCurrentIndex(1 - self.capture_views.currentIndex())
+            tr("cal.btn_view", self.lang),
+            actions,
+            lambda: self.capture_views.setCurrentIndex(1 - self.capture_views.currentIndex()),
         )
-        self.btn_capture = self._button("采集样本（空格）", actions, lambda: self._command("capture"))
-        self.btn_next = self._button("下一点位", actions, lambda: self._command("next"))
-        self.btn_recenter = self._button("点位重定位", actions, lambda: self._command("recenter"))
-        self.btn_auto = self._button("自动采集并求解", actions, lambda: self._command("auto"), True)
-        self.btn_solve_capture = self._button("求解", actions, self.solve)
-        self.btn_clear = self._button("清空样本", actions, lambda: self._command("clear"))
+        self.btn_capture = self._button(tr("cal.btn_capture", self.lang), actions, lambda: self._command("capture"))
+        self.btn_next = self._button(tr("cal.btn_next", self.lang), actions, lambda: self._command("next"))
+        self.btn_recenter = self._button(tr("cal.btn_recenter", self.lang), actions, lambda: self._command("recenter"))
+        self.btn_auto = self._button(tr("cal.btn_auto", self.lang), actions, lambda: self._command("auto"), True)
+        self.btn_solve_capture = self._button(tr("cal.btn_solve", self.lang), actions, self.solve)
+        self.btn_clear = self._button(tr("cal.btn_clear", self.lang), actions, lambda: self._command("clear"))
         layout.addLayout(actions)
-        self.safety_status = QLabel("设备未连接 · 安全状态未知")
+        self.safety_status = QLabel(tr("cal.safety_unknown", self.lang))
         self.safety_status.setWordWrap(True)
         layout.addWidget(self.safety_status)
         self.pages.addWidget(page)
@@ -381,13 +565,17 @@ class MainWindow(QMainWindow):
         self.chk_sim.setEnabled(is_eih)
         self.capture_views.setCurrentIndex(0 if is_eih else 2)
         self.btn_view.setVisible(is_eih)
-        self.btn_connect.setText("连接设备" if is_eih else "开始完整标定")
+        self.btn_connect.setText(tr("cal.connect" if is_eih else "cal.start_full", self.lang))
+        if self.payload is None and self._last_progress is None:
+            self.cal_stage.setText(tr("cal.stage_default_eih" if is_eih else "cal.stage_default_eth", self.lang))
 
     def start_calibration(self, check=False):
         if "calibration" in self.workers:
             return
         mode = self.combo_mode.currentData()
         self._selected_mode = mode
+        self._last_progress = None
+        self._last_safety = None
         ip_override = self.cal_robot_ip.text().strip() or None
         self._show_payload({"mode": mode, "samples": [], "solution": None})
         if mode == "eye-in-hand":
@@ -405,21 +593,26 @@ class MainWindow(QMainWindow):
                 )
                 self._apply_eih_visual_cfg(self.backend.cfg)
             except Exception as exc:
-                self._status(f"配置无效：{exc}")
+                self._status_tr("status.invalid_cfg", error=exc)
                 return
-            operation = lambda context: self.backend.run(context, check=check)
+
+            def operation(context):
+                return self.backend.run(context, check=check)
         else:
             from camera_tool.services.eye_to_hand import calibrate
 
             config = self.cal_config.text()
-            operation = lambda context: calibrate(context, config=config, check=check, ip=ip_override)
+
+            def operation(context):
+                return calibrate(context, config=config, check=check, ip=ip_override)
         self.run_task("calibration", operation, self._calibration_done)
 
     def _calibration_done(self, payload):
         if payload and payload.get("motion_commands_sent") is False:
-            self._status(f"只读检查完成 · {payload.get('evaluation', {}).get('reason', '未发送运动命令')}")
+            reason = payload.get("evaluation", {}).get("reason", "no motion commands sent")
+            self._status_tr("status.check_done_reason", reason=reason)
         elif payload and payload.get("check"):
-            self._status("只读检查完成 · 未发送运动命令")
+            self._status_tr("status.check_done_no_motion")
         elif payload:
             self._show_payload(payload)
             self._navigate(2)
@@ -447,11 +640,11 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         bar = QHBoxLayout()
         self.replay_path = QLineEdit()
-        self.replay_path.setPlaceholderText("历史会话或新会话目录")
+        self.replay_path.setPlaceholderText(tr("results.placeholder", self.lang))
         bar.addWidget(self.replay_path, 1)
-        self.btn_replay = self._button("打开会话…", bar, self.browse_replay)
+        self.btn_replay = self._button(tr("results.open", self.lang), bar, self.browse_replay)
         layout.addLayout(bar)
-        self.result_panel = CalibrationPanel()
+        self.result_panel = CalibrationPanel(lang=self.lang)
         self.result_panel.solve_requested.connect(self.solve)
         self.result_panel.export_requested.connect(self.export_result)
         self.result_panel.sample_toggled.connect(self.toggle_sample)
@@ -461,14 +654,14 @@ class MainWindow(QMainWindow):
 
     def browse_replay(self):
         folder = self.replay_path.text().strip() or QFileDialog.getExistingDirectory(
-            self, "选择历史会话", str(output_path("runs"))
+            self, tr("results.browse_title", self.lang), str(output_path("runs"))
         )
         if folder:
             self.load_replay_directory(folder)
 
     def load_replay_directory(self, directory):
         if "calibration" in self.workers:
-            self._status("请先停止并释放标定设备，再打开历史会话")
+            self._status_tr("status.stop_cal_before_replay")
             return
         self.replay_path.setText(str(directory))
         self.run_task("replay", lambda context: load_session(context, directory), self._replay_done)
@@ -505,7 +698,13 @@ class MainWindow(QMainWindow):
             self._status(payload["error"])
         if mode == "eye-in-hand":
             self.cal_stage.setText(
-                f"有效样本 {sum(s.get('enabled', True) for s in samples)} / {len(samples)} · 点位 {payload.get('index', -1) + 1}"
+                tr(
+                    "cal.stage_eih_counts",
+                    self.lang,
+                    active=sum(s.get("enabled", True) for s in samples),
+                    total=len(samples),
+                    index=payload.get("index", -1) + 1,
+                )
             )
         row = panel.tbl_samples.currentRow()
         if 0 <= row < len(samples):
@@ -575,7 +774,9 @@ class MainWindow(QMainWindow):
             return
         mode = self.payload["mode"]
         default = output_path("result/eye_in_hand.yaml" if mode == "eye-in-hand" else "result/eye_to_hand.yaml")
-        filename, _ = QFileDialog.getSaveFileName(self, "导出标定结果", str(default), "YAML (*.yaml)")
+        filename, _ = QFileDialog.getSaveFileName(
+            self, tr("results.export_title", self.lang), str(default), "YAML (*.yaml)"
+        )
         if not filename:
             return
         if mode == "eye-in-hand" and not self.payload.get("replay") and "calibration" in self.workers:
@@ -583,7 +784,7 @@ class MainWindow(QMainWindow):
             return
         payload = self.payload
         if mode == "eye-to-hand" and payload.get("replay"):
-            self._status("眼在手外回放仅供离线复核，不能发布外参")
+            self._status_tr("status.eth_replay_locked")
             return
 
         def operation(context):
@@ -601,7 +802,7 @@ class MainWindow(QMainWindow):
 
             return publish_camera(filename, payload["solution"], payload["session"])
 
-        self.run_task("export", operation, lambda path: self._status(f"已导出 {path}"))
+        self.run_task("export", operation, lambda path: self._status_tr("status.exported", path=path))
 
     def _build_tripod(self):
         page = QWidget()
@@ -610,20 +811,37 @@ class MainWindow(QMainWindow):
         self.tripod_config = QLineEdit(str(config_path("eye_to_hand.yaml")))
         self.tripod_result = QLineEdit(str(output_path("result/eye_to_hand.yaml")))
         self.tripod_baseline = QLineEdit(str(output_path("result/scene_lock")))
-        form.addRow("相机与阈值配置", self.tripod_config)
-        form.addRow("眼在手外结果", self.tripod_result)
-        form.addRow("基线目录", self.tripod_baseline)
+        self.lbl_tripod_cfg = QLabel(tr("tripod.cfg_label", self.lang))
+        self.lbl_tripod_result = QLabel(tr("tripod.result_label", self.lang))
+        self.lbl_tripod_baseline = QLabel(tr("tripod.baseline_label", self.lang))
+        form.addRow(self.lbl_tripod_cfg, self.tripod_config)
+        form.addRow(self.lbl_tripod_result, self.tripod_result)
+        form.addRow(self.lbl_tripod_baseline, self.tripod_baseline)
         layout.addLayout(form)
         bar = QHBoxLayout()
-        self.btn_lock = self._button("锁定基线", bar, lambda: self.start_tripod("lock"))
-        self.btn_watch = self._button("开始监测", bar, lambda: self.start_tripod("watch"), True)
-        self.btn_tripod_stop = self._button("停止", bar, lambda: self.stop_task("tripod"))
+        self.btn_lock = self._button(tr("tripod.lock", self.lang), bar, lambda: self.start_tripod("lock"))
+        self.btn_watch = self._button(tr("tripod.watch", self.lang), bar, lambda: self.start_tripod("watch"), True)
+        self.btn_tripod_stop = self._button(tr("tripod.stop", self.lang), bar, lambda: self.stop_task("tripod"))
         layout.addLayout(bar)
-        self.tripod_metric = QLabel("桌面 p95 位移 — mm · 跟踪状态 — · 阈值按配置读取")
+        self.tripod_metric = QLabel(tr("tripod.metric_default", self.lang))
         layout.addWidget(self.tripod_metric)
-        self.tripod_image = ImagePreview("先在标定姿态锁定基线，再监测三脚架是否移动")
+        self.tripod_image = ImagePreview(tr("tripod.placeholder", self.lang))
         layout.addWidget(self.tripod_image, 1)
         self.pages.addWidget(page)
+
+    def _update_tripod_metric(self, value):
+        self._last_tripod = value
+        self.tripod_metric.setText(
+            tr(
+                "tripod.metric_fmt",
+                self.lang,
+                p95=value.get("table_p95_mm"),
+                confirmed=value["confirmed"],
+                inliers=value.get("n_inliers"),
+                warn=value["warn_mm"],
+                fail=value["fail_mm"],
+            )
+        )
 
     def start_tripod(self, action):
         from camera_tool.services.tripod import tripod
@@ -632,8 +850,10 @@ class MainWindow(QMainWindow):
         self.run_task(
             "tripod",
             lambda context: tripod(context, action, config=args[0], result=args[1], baseline=args[2]),
-            lambda payload: self._status(
-                f"基线已保存：{payload['baseline']}" if payload and "baseline" in payload else "监测结束"
+            lambda payload: (
+                self._status_tr("status.baseline_saved", baseline=payload["baseline"])
+                if payload and "baseline" in payload
+                else self._status_tr("status.watch_ended")
             ),
         )
 
@@ -658,23 +878,26 @@ class MainWindow(QMainWindow):
         self.usb_max_gap.setDecimals(3)
         self.usb_max_gap.setRange(0.001, 10)
         self.usb_max_gap.setValue(0.1)
-        for title, widget in (
-            ("相机后端", self.usb_kind),
-            ("序列号（空值自动选择）", self.usb_serial),
-            ("彩色流规格", self.usb_profile),
-            ("测试时长（秒）", self.usb_duration),
-            ("统计间隔（秒）", self.usb_interval),
-            ("最低 FPS", self.usb_min_fps),
-            ("最大间隔（秒）", self.usb_max_gap),
+        self._usb_form_labels = []
+        for key, widget in (
+            ("usb.backend", self.usb_kind),
+            ("usb.serial", self.usb_serial),
+            ("usb.profile", self.usb_profile),
+            ("usb.duration", self.usb_duration),
+            ("usb.interval", self.usb_interval),
+            ("usb.min_fps", self.usb_min_fps),
+            ("usb.max_gap", self.usb_max_gap),
         ):
-            form.addRow(title, widget)
+            lbl = QLabel(tr(key, self.lang))
+            self._usb_form_labels.append((lbl, key))
+            form.addRow(lbl, widget)
         layout.addLayout(form)
         bar = QHBoxLayout()
-        self.btn_usb_start = self._button("开始测试", bar, self.start_usb, True)
-        self.btn_usb_stop = self._button("停止", bar, lambda: self.stop_task("usb"))
-        self.btn_usb_export = self._button("导出 CSV", bar, self.export_usb)
+        self.btn_usb_start = self._button(tr("usb.start", self.lang), bar, self.start_usb, True)
+        self.btn_usb_stop = self._button(tr("usb.stop", self.lang), bar, lambda: self.stop_task("usb"))
+        self.btn_usb_export = self._button(tr("usb.export", self.lang), bar, self.export_usb)
         layout.addLayout(bar)
-        self.usb_metric = QLabel("FPS — · 丢帧 — · 最大间隔 — ms · USB — Mbps")
+        self.usb_metric = QLabel(tr("usb.metric_default", self.lang))
         layout.addWidget(self.usb_metric)
         self.usb_log = QPlainTextEdit()
         self.usb_log.setReadOnly(True)
@@ -696,9 +919,10 @@ class MainWindow(QMainWindow):
                 "fps": int(rate),
             }
         except ValueError:
-            self._status("流规格格式应为 1280x720@30")
+            self._status_tr("status.invalid_profile_fmt")
             return
         self.usb_rows = []
+        self._last_usb_row = None
         self.usb_log.clear()
         duration = self.usb_duration.value()
         interval = self.usb_interval.value()
@@ -715,14 +939,14 @@ class MainWindow(QMainWindow):
         from camera_tool.services.usb import export_csv
 
         filename, _ = QFileDialog.getSaveFileName(
-            self, "导出 USB 测试 CSV", str(output_path("usb_stability.csv")), "CSV (*.csv)"
+            self, tr("usb.export_title", self.lang), str(output_path("usb_stability.csv")), "CSV (*.csv)"
         )
         if filename:
             rows = list(self.usb_rows)
             self.run_task(
                 "export",
                 lambda context: str(export_csv(rows, filename)),
-                lambda path: self._status(f"已导出 {path}"),
+                lambda path: self._status_tr("status.exported", path=path),
             )
 
     def run_task(self, name, operation, completed=None):
@@ -731,7 +955,7 @@ class MainWindow(QMainWindow):
         worker = TaskWorker(operation, self)
         self.workers[name] = worker
         worker.update.connect(lambda kind, value: self._task_update(name, kind, value))
-        worker.failed.connect(lambda message: self._status(f"{name}：{message}"))
+        worker.failed.connect(lambda message: self._status(f"{name}: {message}"))
         if completed:
             worker.completed.connect(completed)
         worker.finished.connect(lambda: self._task_finished(name, worker))
@@ -741,30 +965,46 @@ class MainWindow(QMainWindow):
     def stop_task(self, name):
         if name in self.workers:
             self.workers[name].stop()
-            self._status("正在停止任务并释放设备…")
+            self._status_tr("status.stopping_task")
 
     def _task_finished(self, name, worker):
         if self.workers.get(name) is worker:
             del self.workers[name]
         if name == "calibration":
             self._command_busy = False
-            self.safety_status.setText("标定设备已释放 · 当前安全状态未知")
+            self._last_safety = None
+            self.safety_status.setText(tr("cal.safety_released", self.lang))
         worker.deleteLater()
         self._sync_controls()
         if self._closing and not self.workers:
             self.close()
 
+    def _update_preview_meta_label(self, value):
+        self.preview_info.setText(
+            tr(
+                "preview.meta_fmt",
+                self.lang,
+                name=value.get("name", ""),
+                serial=value.get("serial"),
+                w=value["width"],
+                h=value["height"],
+                fps=value.get("fps"),
+                unit=value.get("sdk_depth_unit_m"),
+            )
+        )
+
     def _task_update(self, name, kind, value):
         if kind == "status":
-            self._status(str(value))
+            if str(value) == "Task stopped; devices released":
+                self._status_tr("status.task_stopped")
+            else:
+                self._status(str(value))
         elif kind == "metadata":
             if name == "preview":
                 import json
 
                 self._last_metadata = value
-                self.preview_info.setText(
-                    f"{value.get('name', '')} · SN {value.get('serial')} · 实际 {value['width']}×{value['height']}@{value.get('fps')} · SDK 深度单位 {value.get('sdk_depth_unit_m')} m"
-                )
+                self._update_preview_meta_label(value)
                 self.preview_info.setToolTip(json.dumps(value, ensure_ascii=False, indent=2, default=str))
         elif kind in ("snapshot", "connected"):
             self._show_payload(value)
@@ -774,8 +1014,15 @@ class MainWindow(QMainWindow):
                 self._navigate(2)
             self._sync_controls()
         elif kind == "progress":
+            self._last_progress = value
             self.cal_stage.setText(
-                f"{value['stage']} · 有效腕部样本 {len(value['samples'])}/30 · 固定相机 {value['fixed_count']} 帧"
+                tr(
+                    "cal.stage_eth_progress",
+                    self.lang,
+                    stage=value["stage"],
+                    samples=len(value["samples"]),
+                    fixed=value["fixed_count"],
+                )
             )
             fields = value.get("fields", {})
             if "report" in fields:
@@ -786,21 +1033,28 @@ class MainWindow(QMainWindow):
         elif kind == "usb_summary":
             self._usb_update(value, final=True)
         elif kind == "tripod":
-            self.tripod_metric.setText(
-                f"桌面 p95 位移 {value.get('table_p95_mm')} mm · {value['confirmed']} · 内点 {value.get('n_inliers')} · 警告 {value['warn_mm']} / 失败 {value['fail_mm']} mm"
-            )
+            self._update_tripod_metric(value)
+
+    def _format_usb_text(self, row):
+        return tr(
+            "usb.metric_fmt",
+            self.lang,
+            fps=row["fps"],
+            missing=row["missing_frame_numbers"],
+            gap_ms=row["max_gap_s"] * 1000.0,
+            speed=row["usb_speed_mbps"],
+            desc=row["usb_descriptor"],
+        )
 
     def _usb_update(self, row, final=False):
-        text = (
-            f"FPS {row['fps']:.2f} · 丢帧 {row['missing_frame_numbers']} · "
-            f"最大间隔 {row['max_gap_s'] * 1000:.1f} ms · USB {row['usb_speed_mbps']} Mbps ({row['usb_descriptor']})"
-        )
+        self._last_usb_row = row
+        self._last_usb_final = final
+        text = self._format_usb_text(row)
         self.usb_metric.setText(text)
-        self.usb_log.appendPlainText(("汇总 · " if final else "") + text)
+        self.usb_log.appendPlainText((tr("usb.summary_prefix", self.lang) if final else "") + text)
         if final:
-            self.usb_log.appendPlainText(
-                "已停止" if row.get("stopped") else "测试稳定" if row["stable"] else "存在不稳定或链路降级迹象"
-            )
+            key = "usb.final_stopped" if row.get("stopped") else "usb.final_stable" if row["stable"] else "usb.final_unstable"
+            self.usb_log.appendPlainText(tr(key, self.lang))
 
     def _consume_frames(self):
         for worker in list(self.workers.values()):
@@ -810,9 +1064,15 @@ class MainWindow(QMainWindow):
                     self._render_preview()
                 elif name == "calibration":
                     frame, evaluation, state = packet["frame"], packet["evaluation"], packet["state"]
+                    self._last_safety = state["safety"]
                     self.video_panel.update_frame(packet["annotated"], frame.get("depth_m"), evaluation, state["safety"])
                     self.safety_status.setText(
-                        f"末端离桌 {state['safety'].get('table_clearance_mm', 0):.1f} mm · {state['safety'].get('message', '未知')}"
+                        tr(
+                            "cal.safety_fmt",
+                            self.lang,
+                            clearance=state["safety"].get("table_clearance_mm", 0),
+                            message=state["safety"].get("message", tr("report.unknown", self.lang)),
+                        )
                     )
                     if self.capture_views.currentIndex() == 1:
                         solution = (self.payload or {}).get("solution") or {}
@@ -838,7 +1098,7 @@ class MainWindow(QMainWindow):
         frame = self._last_preview
         if self.combo_view.currentIndex() == 1:
             if frame.get("depth_m") is None:
-                self.preview_image.reset("当前流没有深度数据")
+                self.preview_image.reset(tr("status.no_frames_error", self.lang))
                 return
             image = colorize_depth(frame["depth_m"], self.max_depth.value())
         else:
@@ -847,9 +1107,13 @@ class MainWindow(QMainWindow):
         if depth is not None:
             h, w = depth.shape[:2]
             distance = float(depth[h // 2, w // 2])
-            self.preview_distance.setText(f"中心距离 {distance:.3f} m" if distance > 0 else "中心距离 — m")
+            self.preview_distance.setText(
+                tr("preview.distance_val", self.lang, dist=distance)
+                if distance > 0
+                else tr("preview.distance_empty", self.lang)
+            )
         else:
-            self.preview_distance.setText("当前流无深度")
+            self.preview_distance.setText(tr("preview.distance_none", self.lang))
         if self.chk_crosshair.isChecked():
             import cv2
 
@@ -939,7 +1203,14 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentIndex(index)
         self.nav_buttons[index].setChecked(True)
 
+    def _status_tr(self, key, **kwargs):
+        self._status_key = (key, kwargs)
+        message = tr(key, self.lang, **kwargs)
+        self.status_bar.showMessage(message)
+        self.status_bar.setToolTip(message)
+
     def _status(self, message):
+        self._status_key = None
         self.status_bar.showMessage(message)
         self.status_bar.setToolTip(message)
 
@@ -948,7 +1219,7 @@ class MainWindow(QMainWindow):
             self._closing = True
             for worker in list(self.workers.values()):
                 worker.stop()
-            self._status("正在停止任务，释放设备后关闭…")
+            self._status_tr("status.closing")
             event.ignore()
             return
         self.frame_timer.stop()

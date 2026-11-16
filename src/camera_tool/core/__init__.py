@@ -1,6 +1,10 @@
 """Shared geometry, camera projection, marker detection, and serialization primitives."""
 from camera_tool.core.aruco import MarkerDetector, choose_ippe_pose
-from camera_tool.core.camera_model import CameraModel, marker_object_points, marker_points
+from camera_tool.core.camera_model import (
+    CameraModel,
+    marker_object_points,
+    marker_points,
+)
 from camera_tool.core.geometry import (
     average_se3,
     check_tool_safety,

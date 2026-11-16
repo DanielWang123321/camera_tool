@@ -23,6 +23,6 @@ class TaskWorker(QThread):
                 result = self.operation(self.context)
             self.completed.emit(result)
         except Cancelled:
-            self.update.emit("status", "任务已停止，设备已释放")
+            self.update.emit("status", "Task stopped; devices released")
         except Exception as exc:
             self.failed.emit(str(exc) or type(exc).__name__)

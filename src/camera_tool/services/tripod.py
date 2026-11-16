@@ -13,7 +13,13 @@ from camera_tool.diagnostics.scene_lock import (
     resolve_baseline_dir,
     watch_settings,
 )
-from camera_tool.diagnostics.tripod import append_log, draw_observation, grab_corrected, load_result, lock_from_camera
+from camera_tool.diagnostics.tripod import (
+    append_log,
+    draw_observation,
+    grab_corrected,
+    load_result,
+    lock_from_camera,
+)
 from camera_tool.paths import config_path, output_path
 from camera_tool.services.tasks import DEVICES, resource
 
@@ -27,7 +33,7 @@ def tripod(context, action, config=None, result="result/eye_to_hand.yaml", basel
     fixed_cfg = settings.get("fixed_camera") or settings.get("realsense") or {}
     backend = str(fixed_cfg.get("backend", "realsense")).strip().lower() or "realsense"
     camera = BufferedRgbdCamera(fixed_cfg)
-    with DEVICES.lease([resource(backend, fixed_cfg.get("serial"))], "三脚架检测"):
+    with DEVICES.lease([resource(backend, fixed_cfg.get("serial"))], "Tripod Watch"):
         try:
             context.check()
             camera.start()

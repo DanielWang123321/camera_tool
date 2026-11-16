@@ -23,7 +23,7 @@ from camera_tool.core import (
 
 def split_samples(samples: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if len(samples) != 30:
-        raise CalibrationError(f"需要 30 个有效姿态，当前为 {len(samples)}")
+        raise CalibrationError(f"30 valid poses required, got {len(samples)}")
     train = [s for i, s in enumerate(samples) if i % 5 != 4]
     check = [s for i, s in enumerate(samples) if i % 5 == 4]
     return train, check
@@ -80,7 +80,7 @@ def fit_hand_eye(
         except (cv2.error, ValueError, CalibrationError, np.linalg.LinAlgError):
             continue
     if not seeds:
-        raise CalibrationError("Shah 初始化失败，检查转动、角点和单位")
+        raise CalibrationError("Shah initialization failed; check rotation coverage, corners, and units")
 
     def residual(v: np.ndarray) -> np.ndarray:
         wrist, board = from_vector(v[:6]), from_vector(v[6:])
@@ -93,18 +93,18 @@ def fit_hand_eye(
         if fit.success and np.isfinite(fit.x).all():
             solutions.append((float(np.sqrt(np.mean(residual(fit.x) ** 2))), fit.x, fit.jac))
     if not solutions:
-        raise CalibrationError("角点投影优化未收敛")
+        raise CalibrationError("Corner reprojection optimization did not converge")
     solutions.sort(key=lambda item: item[0])
     rms, best, jac = solutions[0]
     wrist, board = from_vector(best[:6]), from_vector(best[6:])
     for other_rms, other, _ in solutions[1:]:
         distance, angle = pose_error(board, from_vector(other[6:]))
         if other_rms < rms + 0.1 and (distance > 5.0 or angle > 1.0):
-            raise CalibrationError("平面码仍有不同的整体解，需要更丰富的转动")
+            raise CalibrationError("Ambiguous global planar marker solution remains; richer rotation diversity required")
     scaled = jac / np.maximum(np.linalg.norm(jac, axis=0), 1e-12)
     singular = np.linalg.svd(scaled, compute_uv=False)
     if singular[-1] < 1e-4 or np.linalg.norm(wrist[:3, 3]) > 0.6:
-        raise CalibrationError("优化结果不稳定或腕部相机安装距离异常")
+        raise CalibrationError("Optimization unstable or wrist camera mounting offset out of bounds")
     return {
         "X_tcp_wrist": wrist,
         "X_base_board": board,
@@ -144,7 +144,7 @@ def check_samples(
     gates = ("mean_mm", "max_mm", "mean_deg", "max_deg", "max_rms_px")
     failures = [f"{key}={report[key]:.3f}>{thresholds[key]}" for key in gates if report[key] > thresholds[key]]
     if failures:
-        raise CalibrationError(f"{label}未通过，板可能移动或相机安装改变：" + "，".join(failures))
+        raise CalibrationError(f"{label} failed; board may have moved or camera mount shifted: " + ", ".join(failures))
     return report
 
 
@@ -152,9 +152,9 @@ def check_board_geometry(solution: dict[str, Any], config: dict[str, Any]) -> No
     board = valid_transform(solution["X_base_board"])
     tilt = np.rad2deg(np.arccos(np.clip(board[2, 2], -1.0, 1.0)))
     if tilt > config["board_max_tilt_deg"]:
-        raise CalibrationError(f"标定板没有朝上平放（倾斜 {tilt:.1f}°）")
+        raise CalibrationError(f"Calibration board is not level and facing upward (tilt {tilt:.1f} deg)")
     if abs(board[2, 3] - config["table_z_m"]) > config["board_height_tolerance_m"]:
-        raise CalibrationError("标定板高度不符合桌面范围，检查单位或坐标定义")
+        raise CalibrationError("Calibration board Z height disagrees with tabletop range; check units or frame definitions")
 
 
 def solve_wrist(samples: list[dict[str, Any]], metadata: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
@@ -163,9 +163,9 @@ def solve_wrist(samples: list[dict[str, Any]], metadata: dict[str, Any], config:
     solution = fit_hand_eye(train, camera, config["marker"]["side_m"], config["checks"]["min_rotation_deg"])
     solution["train_ids"] = [s["id"] for s in train]
     solution["check_ids"] = [s["id"] for s in check]
-    solution["train_check"] = check_samples(train, camera, config["marker"]["side_m"], solution, config["checks"], "拟合姿态检查")
+    solution["train_check"] = check_samples(train, camera, config["marker"]["side_m"], solution, config["checks"], "Training pose check")
     solution["independent_check"] = check_samples(
-        check, camera, config["marker"]["side_m"], solution, config["checks"], "6 个独立姿态检查"
+        check, camera, config["marker"]["side_m"], solution, config["checks"], "Hold-out 6-pose check"
     )
     check_board_geometry(solution, config["checks"])
     return solution
@@ -181,7 +181,7 @@ def _marker_inliers(
     points = np.asarray(points_color, dtype=float)
     points = points[np.isfinite(points).all(axis=1) & (points[:, 2] > 0.05) & (points[:, 2] < 3.0)]
     if len(points) < 100:
-        raise CalibrationError("固定相机有效原始深度不足")
+        raise CalibrationError("Insufficient valid raw depth points from fixed camera")
     pixels = camera.project(points)
     corners_arr = np.asarray(corners, dtype=np.float32)
     expanded = (corners_arr.mean(axis=0) + (corners_arr - corners_arr.mean(axis=0)) * 1.35).astype(np.int32)
@@ -193,12 +193,12 @@ def _marker_inliers(
     selected = indices[mask[uv[indices, 1], uv[indices, 0]] != 0]
     points = points[selected]
     if len(points) < min_points:
-        raise CalibrationError("标定码附近桌面有效深度不足")
+        raise CalibrationError("Insufficient valid tabletop depth points near marker")
     normal, origin = x_camera_board[:3, 2], x_camera_board[:3, 3]
     distance = np.abs((points - origin) @ normal)
     inliers = points[distance <= max(0.008, float(np.median(distance)) * 3.0)]
     if len(inliers) < min_points:
-        raise CalibrationError("桌面深度平面不稳定")
+        raise CalibrationError("Unstable tabletop depth plane")
     return points, inliers, distance, normal
 
 
@@ -217,13 +217,13 @@ def report_depth(
     center = inliers.mean(axis=0)
     _, singular, vt = np.linalg.svd(inliers - center, full_matrices=False)
     if singular[1] / np.sqrt(len(inliers)) < 0.01:
-        raise CalibrationError("桌面深度覆盖面积不足")
+        raise CalibrationError("Insufficient tabletop depth spatial coverage")
     normal_depth = vt[-1]
     angle = float(np.rad2deg(np.arccos(np.clip(abs(normal_depth @ normal), 0.0, 1.0))))
     points_base = transform_points(x_base_board @ inv(x_camera_board), inliers)
     table_error_mm = float(abs(np.median(points_base[:, 2]) - config["table_z_m"]) * 1000.0)
     result = {
-        "points": int(len(points)),
+        "points": len(points),
         "median_mm": float(median_mm),
         "p95_mm": float(p95_mm),
         "normal_deg": angle,
@@ -251,7 +251,7 @@ def depth_check(
     result = report_depth(points_color, camera, corners, x_camera_board, x_base_board, config)
     if not result["ok"]:
         public = {k: result[k] for k in result if k != "inliers"}
-        raise CalibrationError(f"桌面深度核对未通过：{public}")
+        raise CalibrationError(f"Tabletop depth consistency check failed: {public}")
     return {k: result[k] for k in result if k != "inliers"}
 
 
@@ -284,13 +284,13 @@ def solve_fixed_camera(
     fixed_cfg = config.get("fixed_camera") or config.get("realsense") or {}
     required_frames = int(config.get("fixed_frames") or config.get("realsense_frames") or fixed_cfg.get("frames", 12))
     if len(samples) < required_frames:
-        raise CalibrationError("固定相机有效帧数不足")
+        raise CalibrationError("Insufficient valid frames from fixed camera")
     camera = CameraModel(metadata)
     side = config["marker"]["side_m"]
     corners = np.stack([s["corners"] for s in samples])
     drift = np.linalg.norm(corners - corners[0], axis=2).max()
     if drift > config["checks"]["static_corner_drift_px"]:
-        raise CalibrationError("固定相机多帧期间板或相机移动")
+        raise CalibrationError("Board or fixed camera moved across static capture frames")
     seeds = camera.candidates(corners.mean(axis=0), side)
     solutions = []
     for pose, _ in seeds:
@@ -320,7 +320,7 @@ def solve_fixed_camera(
                 reports.append(None)
         solutions.append((rms, x_camera_board, reports, warnings))
     if not solutions:
-        raise CalibrationError("固定相机彩色求解未通过（角点投影未收敛）")
+        raise CalibrationError("Fixed camera color solve failed (corner reprojection did not converge)")
 
     def score(item: Any) -> tuple[float, float]:
         rms, _, reports, _ = item
@@ -342,7 +342,6 @@ def solve_fixed_camera(
         "X_base_camera": x_base_camera,
         "X_camera_board": x_camera_board,
         "fixed_rms_px": rms,
-        "realsense_rms_px": rms,
         "depth_checks": public,
         "depth_ok": depth_ok,
         "depth_scale": depth_scale,
@@ -351,6 +350,3 @@ def solve_fixed_camera(
         "camera_frame": "color_optical_frame",
         "depth_aligned_to": "color",
     }
-
-
-solve_realsense = solve_fixed_camera

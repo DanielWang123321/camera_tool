@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-USB3_MIN_SPEED_MBPS = 4000  # USB 3.x >= 5000 Mbps, USB 2.0 = 480 Mbps
+USB3_MIN_SPEED_MBPS = 4000
 VENDOR_IDS_BY_BACKEND: dict[str, tuple[str, ...]] = {
     "realsense": ("8086",),
     "orbbec": ("2bc5",),
@@ -14,7 +14,7 @@ VENDOR_IDS_BY_BACKEND: dict[str, tuple[str, ...]] = {
 class UsbSpeed:
     """USB link speed and serial read from Linux sysfs."""
 
-    __slots__ = ("path", "speed_mbps", "serial")
+    __slots__ = ("path", "serial", "speed_mbps")
 
     def __init__(self, path: str, speed_mbps: int, serial: str = "") -> None:
         self.path = path

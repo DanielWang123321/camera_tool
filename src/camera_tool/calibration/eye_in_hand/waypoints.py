@@ -54,7 +54,7 @@ class WaypointPlanner:
     def select_model(self, model_key: str, preset_file: str | None = None) -> dict[str, Any]:
         resolved_key = PROFILE_ALIASES.get(model_key, model_key)
         if resolved_key not in self.models:
-            raise CalibrationError(f"未知的机械臂构型配置: {model_key}")
+            raise CalibrationError(f"Unknown robot kinematic profile: {model_key}")
         self.current_model = resolved_key
         profile = self.models[resolved_key]
         robot_section = self.default_cfg.get("robot", {})
@@ -113,7 +113,7 @@ class WaypointPlanner:
     ) -> list[dict[str, Any]]:
         """Translate and rotate the preset waypoint constellation around a newly observed board center."""
         if not self.waypoints:
-            raise CalibrationError(f"当前构型 {self.current_model} 尚无预设点位可供重定位")
+            raise CalibrationError(f"No preset waypoints available for profile {self.current_model} to recenter")
 
         old_center = np.asarray(self.robot_cfg["workspace"]["target_center_m"], dtype=float)
         new_center = np.asarray(new_board_center_m, dtype=float).reshape(3)

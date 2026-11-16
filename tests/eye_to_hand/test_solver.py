@@ -1,26 +1,43 @@
-"""离线验收：几何恢复、独立检查、深度报告与内参加载。"""
+"""Offline verification: geometry recovery, hold-out checks, depth consistency, and intrinsics loading."""
 from __future__ import annotations
 
 import copy
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from camera_tool.calibration.eye_to_hand.solver import (check_samples, depth_check, fit_hand_eye, report_depth, solve_realsense,
-                        solve_wrist, split_samples)
+from camera_tool.calibration.eye_to_hand.solver import (
+    check_samples,
+    depth_check,
+    fit_hand_eye,
+    report_depth,
+    solve_fixed_camera,
+    solve_wrist,
+    split_samples,
+)
+from camera_tool.calibration.eye_to_hand.workflow import (
+    capture_consistency,
+    color_metadata,
+    depth_points,
+    load_settings,
+)
 from camera_tool.calibration.eye_to_hand.wrist_model import load_wrist_intrinsics
-from camera_tool.calibration.eye_to_hand.workflow import capture_consistency, color_metadata, depth_points, load_settings
-from camera_tool.core import CalibrationError, CameraModel, MarkerDetector, RejectedSample, inv, marker_points, pose_error, transform, transform_points
+from camera_tool.core import (
+    CalibrationError,
+    CameraModel,
+    MarkerDetector,
+    RejectedSample,
+    inv,
+    marker_points,
+    pose_error,
+    transform,
+    transform_points,
+)
 from camera_tool.paths import config_path
 
 
@@ -105,7 +122,7 @@ class GeometryTests(unittest.TestCase):
         self.assertLess(pose_error(result["X_base_board"], board)[0], .5)
 
     def test_planar_candidate_order_does_not_change_solution(self):
-        config, camera, _, board, samples = synthetic()
+        _config, camera, _, board, samples = synthetic()
         original = camera.candidates
         camera.candidates = lambda corners, side: original(corners, side)[::-1]
         result = fit_hand_eye(split_samples(samples)[0], camera, .15)
@@ -117,14 +134,14 @@ class GeometryTests(unittest.TestCase):
             bad = copy.deepcopy(samples)
             for i, sample in enumerate(bad):
                 sample["X_base_tcp"][:3, :3] = Rotation.from_euler("z", i if one_axis else 0, degrees=True).as_matrix()
-            with self.assertRaisesRegex(CalibrationError, "转动不足"):
+            with self.assertRaisesRegex(CalibrationError, "multi-axis robot rotation"):
                 solve_wrist(bad, camera.metadata, config)
 
     def test_board_movement_in_independent_samples_fails(self):
         config, camera, _, _, samples = synthetic()
         for sample in split_samples(samples)[1]:
             sample["X_base_tcp"][0, 3] += .025
-        with self.assertRaisesRegex(CalibrationError, "独立姿态检查"):
+        with self.assertRaisesRegex(CalibrationError, "Hold-out 6-pose check"):
             solve_wrist(samples, camera.metadata, config)
 
     def test_wrong_units_fail(self):
@@ -137,7 +154,7 @@ class GeometryTests(unittest.TestCase):
     def test_realsense_composition_and_native_depth(self):
         config, _, wrist, board, _ = synthetic()
         meta, expected, _, _, _, samples = static_scene(board)
-        solution = solve_realsense(samples, meta, {"X_base_board": board, "X_tcp_wrist": wrist}, config)
+        solution = solve_fixed_camera(samples, meta, {"X_base_board": board, "X_tcp_wrist": wrist}, config)
         self.assertLess(pose_error(expected, solution["X_base_camera"])[0], .01)
         self.assertTrue(solution["depth_ok"])
         self.assertLess(solution["depth_checks"][0]["median_mm"], .6)
@@ -146,7 +163,7 @@ class GeometryTests(unittest.TestCase):
     def test_wrong_depth_warns_but_geometry_publishes(self):
         config, _, wrist, board, _ = synthetic()
         meta, expected, camera_board, _, _, samples = static_scene(board)
-        with self.assertRaisesRegex(CalibrationError, "深度核对"):
+        with self.assertRaisesRegex(CalibrationError, "depth consistency check"):
             depth_check(samples[0]["points_color"] + [0, 0, .04], CameraModel(meta), samples[0]["corners"],
                         camera_board, board, config["checks"])
         report = report_depth(samples[0]["points_color"] + [0, 0, .04], CameraModel(meta), samples[0]["corners"],
@@ -155,7 +172,7 @@ class GeometryTests(unittest.TestCase):
         bad = copy.deepcopy(samples)
         for sample in bad:
             sample["points_color"] = np.asarray(sample["points_color"]) + [0, 0, .04]
-        solution = solve_realsense(bad, meta, {"X_base_board": board, "X_tcp_wrist": wrist}, config)
+        solution = solve_fixed_camera(bad, meta, {"X_base_board": board, "X_tcp_wrist": wrist}, config)
         self.assertLess(pose_error(expected, solution["X_base_camera"])[0], .01)
         self.assertFalse(solution["depth_ok"])
         self.assertTrue(0.5 < solution["depth_scale"] < 1.5)
@@ -165,8 +182,8 @@ class GeometryTests(unittest.TestCase):
         config, _, _, board, _ = synthetic()
         meta, _, _, _, _, samples = static_scene(board)
         samples[-1]["corners"] = np.asarray(samples[-1]["corners"]) + 5
-        with self.assertRaisesRegex(CalibrationError, "期间板或相机移动"):
-            solve_realsense(samples, meta, {"X_base_board": board}, config)
+        with self.assertRaisesRegex(CalibrationError, "moved across static capture frames"):
+            solve_fixed_camera(samples, meta, {"X_base_board": board}, config)
 
 
 class FrameTests(unittest.TestCase):
@@ -184,7 +201,7 @@ class FrameTests(unittest.TestCase):
             detector.detect(cv2.GaussianBlur(image, (81, 81), 25))
 
     def test_raw_seucm_cannot_be_used_as_pinhole(self):
-        with self.assertRaisesRegex(CalibrationError, "未经处理"):
+        with self.assertRaisesRegex(CalibrationError, "Unsupported raw camera distortion model"):
             CameraModel({**camera_metadata(), "model": "SEUCM"})
 
     def test_unknown_realsense_distortion_fails(self):
@@ -236,8 +253,8 @@ class FrameTests(unittest.TestCase):
     def test_independent_check_helper(self):
         config, camera, _, _, samples = synthetic()
         result = solve_wrist(samples, camera.metadata, config)
-        train, check = split_samples(samples)
-        report = check_samples(check, camera, .15, result, config["checks"], "6 个独立姿态检查")
+        _train, check = split_samples(samples)
+        report = check_samples(check, camera, .15, result, config["checks"], "Hold-out 6-pose check")
         self.assertEqual(report["count"], 6)
 
 

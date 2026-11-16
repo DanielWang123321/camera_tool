@@ -132,7 +132,7 @@ def solve_hand_eye_all(
     """Run all 7 OpenCV algorithms plus IPPE-disambiguated Bundle Adjustment on active samples."""
     active = [s for s in samples if s.get("enabled", True)]
     if len(active) < 5:
-        raise CalibrationError(f"启用样本数不足，至少需要 5 组有效姿态（当前 {len(active)} 组）")
+        raise CalibrationError(f"Insufficient active samples; at least 5 valid poses required (got {len(active)})")
 
     flange_poses = [valid_transform(s["X_base_flange"]) for s in active]
     coverage_deg = rotation_coverage(flange_poses, minimum_rotation_deg)
@@ -190,7 +190,9 @@ def solve_hand_eye_all(
             continue
 
     if not seeds:
-        raise CalibrationError("所有手眼标定初值算法均未收敛，请检查角点质量与多轴旋转激励")
+        raise CalibrationError(
+            "All hand-eye initialization solvers failed to converge; check corner quality and multi-axis rotation coverage"
+        )
 
     def residual_fn(vec: np.ndarray) -> np.ndarray:
         from camera_tool.services.tasks import check_cancelled
@@ -221,7 +223,7 @@ def solve_hand_eye_all(
             opt_solutions.append((rms, fit.x, fit.jac))
 
     if not opt_solutions:
-        raise CalibrationError("2D 角点非线性重投影优化未收敛")
+        raise CalibrationError("Nonlinear 2D corner reprojection bundle adjustment did not converge")
 
     opt_solutions.sort(key=lambda item: item[0])
     _, best_vec, best_jac = opt_solutions[0]
@@ -310,7 +312,7 @@ def evaluate_depth_consistency(
     valid = np.isfinite(pts).all(axis=1) & (pts[:, 2] > float(min_depth_m)) & (pts[:, 2] < float(max_depth_m))
     pts = pts[valid]
     if len(pts) < 50:
-        return {"ok": False, "reason": "有效深度点不足", "points_count": len(pts)}
+        return {"ok": False, "reason": "Insufficient valid depth points", "points_count": len(pts)}
 
     x_base_cam = valid_transform(x_base_flange) @ valid_transform(x_flange_cam)
     board_pose = valid_transform(x_base_board)
@@ -350,7 +352,7 @@ def evaluate_depth_consistency(
         if mask.sum() > best_mask.sum():
             best_mask = mask
     if best_mask.sum() < max(30, len(leveled) * 0.5):
-        return {"ok": False, "reason": "深度点中未找到稳定的主平面", "points_count": len(leveled)}
+        return {"ok": False, "reason": "No stable dominant plane found in depth points", "points_count": len(leveled)}
     for _ in range(2):
         plane = leveled[best_mask]
         center = plane.mean(axis=0)
@@ -369,7 +371,7 @@ def evaluate_depth_consistency(
 
     return {
         "ok": bool(z_err_mm <= 15.0 and normal_deg <= 5.0),
-        "points_count": int(len(leveled)),
+        "points_count": len(leveled),
         "plane_inliers": int(best_mask.sum()),
         "plane_inlier_ratio": float(best_mask.mean()),
         "table_z_median_mm": z_median_m * 1000.0,

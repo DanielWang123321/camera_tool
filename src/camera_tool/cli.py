@@ -10,75 +10,75 @@ import sys
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="camera-tool",
-        description="相机预览、手眼标定、离线回放与设备诊断工具",
+        description="Camera preview, hand-eye calibration, offline replay, and diagnostics tool",
     )
-    root.add_argument("--sim", action="store_true", help="离线仿真模式")
+    root.add_argument("--sim", action="store_true", help="Run in offline simulation mode")
     sub = root.add_subparsers(dest="command")
 
-    preview = sub.add_parser("preview", help="打开相机实时预览或枚举设备")
+    preview = sub.add_parser("preview", help="Open live camera preview or list available devices")
     preview.add_argument(
         "--backend",
         choices=("realsense", "orbbec", "uvc", "sim"),
         default="realsense",
-        help="相机后端（默认 realsense）",
+        help="Camera backend (default: realsense)",
     )
-    preview.add_argument("--serial", default="", help="设备序列号（留空自动选择单台设备）")
+    preview.add_argument("--serial", default="", help="Device serial number (leave empty to auto-select single device)")
     preview.add_argument("--width", type=int)
     preview.add_argument("--height", type=int)
     preview.add_argument("--fps", type=int)
-    preview.add_argument("--no-depth", action="store_true", help="仅开启彩色流")
-    preview.add_argument("--max-depth", type=float, help="深度伪彩色显示上限（米）")
-    preview.add_argument("--list", action="store_true", help="仅枚举可用后端与在线设备")
-    preview.add_argument("--headless", action="store_true", help="无界面抓取单帧校验流状态")
+    preview.add_argument("--no-depth", action="store_true", help="Enable color stream only")
+    preview.add_argument("--max-depth", type=float, help="Max depth range for colormap visualization (meters)")
+    preview.add_argument("--list", action="store_true", help="Discover backends and connected devices as JSON")
+    preview.add_argument("--headless", action="store_true", help="Grab one headless frame and verify stream status")
 
-    cal = sub.add_parser("calibrate", help="执行手眼标定；正式模式会驱动机械臂运动")
+    cal = sub.add_parser("calibrate", help="Run hand-eye calibration (live mode commands robot motion)")
     cal.add_argument("--mode", choices=("eye-in-hand", "eye-to-hand"), required=True)
     cal.add_argument(
         "--backend",
         choices=("auto", "realsense", "orbbec", "sim"),
         default="auto",
-        help="相机后端（默认 auto 自动检测）",
+        help="Camera backend (default: auto)",
     )
     cal.add_argument(
         "--preset",
         choices=("auto", "default", "medium_range", "orbbec"),
         default="auto",
-        help="眼在手上配置预设模板（默认 auto）",
+        help="Eye-in-Hand preset config template (default: auto)",
     )
-    cal.add_argument("--profile", help="机械臂构型配置（如 arm_6dof, arm_7dof, arm_compact_6dof）")
-    cal.add_argument("--serial", default="", help="指定相机序列号（留空则单设备自动选择）")
-    cal.add_argument("--robot-ip", help="覆盖机械臂 IP（未指定时依次读取 XARM_IP 环境变量与 YAML 配置）")
-    cal.add_argument("--config", help="自定义 YAML 配置文件路径")
-    cal.add_argument("--check", action="store_true", help="只读检查，不使能、移动机械臂或发布外参")
-    cal.add_argument("--auto", action="store_true", help="无界面自动采集全部点位并求解")
-    cal.add_argument("--sim", action="store_true", help="离线仿真模式（仅支持眼在手上）")
-    cal.add_argument("--output", help="标定会话保存目录")
-    cal.add_argument("--result", help="导出结果 YAML 路径")
-    cal.add_argument("--gui", action="store_true", help="打开桌面端标定页面")
+    cal.add_argument("--profile", help="Robot kinematic profile (e.g., arm_6dof, arm_7dof, arm_compact_6dof)")
+    cal.add_argument("--serial", default="", help="Camera serial number (leave empty to auto-select single device)")
+    cal.add_argument("--robot-ip", help="Override robot IP (falls back to XARM_IP env var and YAML config)")
+    cal.add_argument("--config", help="Path to custom YAML configuration file")
+    cal.add_argument("--check", action="store_true", help="Read-only check; never enable, move robot, or publish YAML")
+    cal.add_argument("--auto", action="store_true", help="Headless automatic capture across waypoints and solve")
+    cal.add_argument("--sim", action="store_true", help="Offline simulation mode (eye-in-hand only)")
+    cal.add_argument("--output", help="Calibration session output directory")
+    cal.add_argument("--result", help="Exported calibration result YAML path")
+    cal.add_argument("--gui", action="store_true", help="Open calibration page in desktop GUI")
 
-    replay = sub.add_parser("replay", help="自动识别历史会话并离线复算（不导入硬件 SDK）")
-    replay.add_argument("directory", help="历史会话目录路径")
-    replay.add_argument("--config", help="眼在手上回放检查配置 YAML")
-    replay.add_argument("--result", help="眼在手上导出 YAML 路径；眼在手外回放不允许发布外参")
+    replay = sub.add_parser("replay", help="Auto-detect recorded session and recompute offline (no hardware SDK import)")
+    replay.add_argument("directory", help="Path to recorded session directory")
+    replay.add_argument("--config", help="Optional Eye-in-Hand config YAML for replay verification")
+    replay.add_argument("--result", help="Eye-in-Hand output YAML path (eye-to-hand replay cannot publish)")
     replay.add_argument(
         "--tcp-offset",
-        help="离线覆盖末端 TCP 偏移 x,y,z,r,p,y（单位 mm,rad，如 0,0,172,0,0,0）",
+        help="Override tool TCP offset x,y,z,r,p,y (mm, rad), e.g. 0,0,172,0,0,0",
     )
-    replay.add_argument("--output", default="runs/eye_to_hand/replay", help="眼在手外离线复算输出目录")
-    replay.add_argument("--gui", action="store_true", help="在桌面端打开回放结果")
+    replay.add_argument("--output", default="runs/eye_to_hand/replay", help="Eye-to-Hand offline replay output directory")
+    replay.add_argument("--gui", action="store_true", help="Open replay results in desktop GUI")
 
-    tripod = sub.add_parser("tripod", help="固定相机基线锁定与三脚架位移监测")
+    tripod = sub.add_parser("tripod", help="Fixed camera baseline lock and tripod drift monitoring")
     tripod.add_argument("action", choices=("lock", "watch"))
-    tripod.add_argument("--config", help="配置文件路径")
-    tripod.add_argument("--result", default="result/eye_to_hand.yaml", help="眼在手外标定结果 YAML")
-    tripod.add_argument("--baseline", help="基线保存/读取目录")
-    tripod.add_argument("--once", action="store_true", help="无界面检查单帧；FAIL 返回退出码 2")
-    tripod.add_argument("--headless", action="store_true", help="无界面持续打印监测数据")
-    tripod.add_argument("--log", help="监测日志文件路径")
+    tripod.add_argument("--config", help="Configuration YAML file path")
+    tripod.add_argument("--result", default="result/eye_to_hand.yaml", help="Published Eye-to-Hand result YAML")
+    tripod.add_argument("--baseline", help="Baseline save/load directory")
+    tripod.add_argument("--once", action="store_true", help="Headless single-frame check; returns exit code 2 on FAIL")
+    tripod.add_argument("--headless", action="store_true", help="Headless continuous monitoring stream")
+    tripod.add_argument("--log", help="Monitoring log file path (JSONL)")
 
-    usb = sub.add_parser("usb-test", help="无界面 USB 链路与帧率稳定性测试")
-    usb.add_argument("--backend", choices=("realsense", "orbbec"), default="realsense", help="RGB-D 相机后端")
-    usb.add_argument("--serial", default="", help="设备序列号（留空自动选择）")
+    usb = sub.add_parser("usb-test", help="Headless USB link speed and frame-rate stability test")
+    usb.add_argument("--backend", choices=("realsense", "orbbec"), default="realsense", help="RGB-D camera backend")
+    usb.add_argument("--serial", default="", help="Device serial number (empty auto-selects)")
     usb.add_argument("--width", type=int, default=1280)
     usb.add_argument("--height", type=int, default=720)
     usb.add_argument("--fps", type=int, default=30)
@@ -86,12 +86,14 @@ def parser() -> argparse.ArgumentParser:
     usb.add_argument("--interval", type=float, default=5)
     usb.add_argument("--min-fps", type=float, default=29.0)
     usb.add_argument("--max-gap", type=float, default=0.1)
-    usb.add_argument("--csv", help="导出窗口统计 CSV 路径")
-    usb.add_argument("--quiet", action="store_true", help="仅在结束时输出汇总 JSON")
+    usb.add_argument("--csv", help="Export window statistics CSV path")
+    usb.add_argument("--quiet", action="store_true", help="Print only final summary JSON")
 
-    maintenance = sub.add_parser("maintenance", help="腕部内参转换、角点标定与取流核对")
-    maintenance.add_argument("action", choices=("wrist-intrinsics", "corners", "verify"))
-    maintenance.add_argument("arguments", nargs=argparse.REMAINDER)
+    wrist = sub.add_parser("wrist-intrinsics", help="Export wrist camera undistortion map for Eye-to-Hand calibration")
+    wrist.add_argument("--config", default=None, help="Eye-to-Hand configuration YAML path")
+    wrist.add_argument("--serial", default=None, help="Wrist camera serial number (optional when a single device is connected)")
+    wrist.add_argument("--from-run", default=None, help="Copy intrinsics and rectification map from a recorded session directory")
+    wrist.add_argument("--output", default=None, help="Output JSON path (default: intrinsics/wrist_<serial>.json)")
     return root
 
 
@@ -106,11 +108,11 @@ def _parse_tcp_offset(raw: str | None) -> list[float] | None:
         return None
     parts = [p.strip() for p in str(raw).split(",") if p.strip() != ""]
     if len(parts) != 6:
-        raise ValueError("--tcp-offset 须为逗号分隔的 6 个数值 x,y,z,r,p,y（单位 mm,rad），例如 0,0,172,0,0,0")
+        raise ValueError("--tcp-offset must be 6 comma-separated values x,y,z,r,p,y (mm, rad), e.g. 0,0,172,0,0,0")
     try:
         return [float(p) for p in parts]
     except ValueError as exc:
-        raise ValueError("--tcp-offset 包含无法解析的数值") from exc
+        raise ValueError("--tcp-offset contains non-numeric values") from exc
 
 
 def launch_gui(args=None) -> int:
@@ -119,6 +121,7 @@ def launch_gui(args=None) -> int:
     prepare_qt()
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
+
     from camera_tool.ui.main_window import MainWindow
 
     args = args or argparse.Namespace(command=None, sim=False)
@@ -205,7 +208,11 @@ def main(argv=None) -> int:
     try:
         with task_scope(context):
             if command == "preview":
-                from camera_tool.devices.registry import PROFILES, create_camera, device_resource
+                from camera_tool.devices.registry import (
+                    PROFILES,
+                    create_camera,
+                    device_resource,
+                )
                 from camera_tool.services.tasks import DEVICES
 
                 w, h, fps = PROFILES[args.backend][0]
@@ -217,7 +224,7 @@ def main(argv=None) -> int:
                     "enable_depth": not args.no_depth and args.backend != "uvc",
                 }
                 cam = create_camera(args.backend, cfg)
-                with DEVICES.lease([device_resource(args.backend, args.serial)], "无界面预览检查"):
+                with DEVICES.lease([device_resource(args.backend, args.serial)], "Headless preview check"):
                     try:
                         meta = cam.start()
                         frame = cam.read()
@@ -237,7 +244,7 @@ def main(argv=None) -> int:
             if command == "calibrate":
                 sim = bool(args.sim or args.backend == "sim")
                 if sim and args.mode != "eye-in-hand":
-                    raise ValueError("离线仿真仅支持眼在手上 (eye-in-hand)")
+                    raise ValueError("Offline simulation is only supported for eye-in-hand mode")
                 output = args.output or f"runs/{args.mode.replace('-', '_')}"
                 result = args.result or f"result/{args.mode.replace('-', '_')}.yaml"
                 if args.mode == "eye-in-hand":
@@ -286,9 +293,9 @@ def main(argv=None) -> int:
                 mode, _ = detect_session(args.directory)
                 tcp_offset = _parse_tcp_offset(args.tcp_offset)
                 if tcp_offset is not None and mode != "eye-in-hand":
-                    raise ValueError("--tcp-offset 仅适用于眼在手上回放复算")
+                    raise ValueError("--tcp-offset is only supported for eye-in-hand replay")
                 if args.result and mode == "eye-to-hand":
-                    raise ValueError("眼在手外回放不允许发布外参；可查看输出目录的 result.json")
+                    raise ValueError("Eye-to-hand replay cannot publish extrinsics; inspect result.json in the output directory")
                 payload = load_session(
                     context,
                     args.directory,
@@ -332,19 +339,24 @@ def main(argv=None) -> int:
                 payload = tripod(context, args.action, args.config, args.result, args.baseline, args.once, args.log)
                 print(_json(payload))
                 return 2 if payload.get("confirmed") == "FAIL" else 0
-            if command == "maintenance":
-                if args.action == "verify":
-                    from camera_tool.maintenance.verify_preview import main as maintenance
-                elif args.action == "corners":
-                    from camera_tool.maintenance.calibrate_corners import main as maintenance
-                else:
-                    from camera_tool.maintenance.dump_wrist_model import main as maintenance
-                return maintenance(args.arguments)
+            if command == "wrist-intrinsics":
+                from camera_tool.calibration.eye_to_hand.wrist_model import (
+                    export_wrist_intrinsics,
+                )
+
+                dest = export_wrist_intrinsics(
+                    config_file=args.config,
+                    serial=args.serial,
+                    from_run=args.from_run,
+                    output=args.output,
+                )
+                print(_json({"output": str(dest)}))
+                return 0
     except (Cancelled, KeyboardInterrupt):
-        print("任务已停止，设备已释放", file=sys.stderr)
+        print("Task stopped; devices released", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(f"失败：{exc}", file=sys.stderr)
+        print(f"Failed: {exc}", file=sys.stderr)
         return 1
     finally:
         for signum, handler in previous.items():

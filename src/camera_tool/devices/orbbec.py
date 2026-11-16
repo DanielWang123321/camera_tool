@@ -91,14 +91,14 @@ def scan_sysfs_orbbec() -> list[SysfsUsbInfo]:
 
 def format_permission_error(sysfs_devices: list[SysfsUsbInfo]) -> str:
     unwritable = [d for d in sysfs_devices if not d.writable]
-    lines = ["无法打开 Orbbec USB 设备：当前用户缺少 libusb 节点写权限。"]
+    lines = ["Cannot open Orbbec USB device: current user lacks write permission on libusb node."]
     for dev in unwritable:
-        node_str = str(dev.devnode) if dev.devnode else "未知节点"
-        sn_str = f"SN {dev.serial}" if dev.serial else "SN 未知"
+        node_str = str(dev.devnode) if dev.devnode else "unknown node"
+        sn_str = f"SN {dev.serial}" if dev.serial else "SN unknown"
         lines.append(
-            f"  检测到 {dev.product} ({dev.vid}:{dev.pid}, {sn_str}, {dev.speed_mbps} Mbps) -> {node_str} (不可写)"
+            f"  Detected {dev.product} ({dev.vid}:{dev.pid}, {sn_str}, {dev.speed_mbps} Mbps) -> {node_str} (not writable)"
         )
-    lines.append("请先在终端执行一次 udev 权限安装脚本：")
+    lines.append("Run the udev rules installer once in terminal:")
     lines.append(f"  sudo bash {UDEV_SCRIPT}")
     return "\n".join(lines)
 
@@ -140,7 +140,7 @@ def _find_device(ctx: Any, serial: str) -> Any:
     device_list = ctx.query_devices()
     count = device_list.get_count()
     if count == 0:
-        raise RuntimeError("未检测到 Orbbec 设备，请检查 USB 连接。")
+        raise RuntimeError("No Orbbec device detected; check USB connection.")
 
     opened: list[tuple[str, Any]] = []
     for idx in range(count):
@@ -152,17 +152,17 @@ def _find_device(ctx: Any, serial: str) -> Any:
                 raise RuntimeError(format_permission_error(sysfs_devices)) from exc
             if "openUsbDevice failed" in msg or "permission" in msg.lower():
                 raise RuntimeError(
-                    f"打开 Orbbec USB 设备失败（{msg}）。\n"
-                    f"请确认未被其他程序占用，并已执行：sudo bash {UDEV_SCRIPT}"
+                    f"Failed to open Orbbec USB device ({msg}).\n"
+                    f"Ensure it is not in use by another program and run: sudo bash {UDEV_SCRIPT}"
                 ) from exc
-            raise RuntimeError(f"打开 Orbbec 设备失败：{msg}") from exc
+            raise RuntimeError(f"Failed to open Orbbec device: {msg}") from exc
         sn = dev.get_device_info().get_serial_number()
         if not serial or sn == serial:
             return dev
         opened.append((sn, dev))
 
-    found = ", ".join(sn for sn, _ in opened) or "无"
-    raise RuntimeError(f"未找到序列号 {serial} 的 Orbbec 设备。当前已连接：{found}")
+    found = ", ".join(sn for sn, _ in opened) or "none"
+    raise RuntimeError(f"Orbbec device with serial {serial} not found. Connected: {found}")
 
 
 def _select_video_profile(
@@ -187,7 +187,7 @@ def _select_video_profile(
         available = ", ".join(_summarize_profiles(profile_list)[:10])
         detail = f" ({last_err})" if last_err is not None else ""
         raise RuntimeError(
-            f"无法以 {width}x{height}@{fps} 开启 {stream_label} 流{detail}。 当前设备支持：{available}"
+            f"Cannot open {stream_label} stream at {width}x{height}@{fps}{detail}. Supported profiles: {available}"
         ) from exc
 
 
@@ -232,7 +232,7 @@ def _frame_to_bgr(color_frame: Any) -> np.ndarray | None:
             return None
         code = cv2.COLOR_YUV2BGR_I420 if fmt == ob.OBFormat.I420 else cv2.COLOR_YUV2BGR_YV12
         return cv2.cvtColor(raw[:expected].reshape((height * 3 // 2, width)), code)
-    raise RuntimeError(f"暂不支持的彩色像素格式：{fmt.name}")
+    raise RuntimeError(f"Unsupported color pixel format: {fmt.name}")
 
 
 def _extract_depth_meters(depth_frame: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -242,7 +242,7 @@ def _extract_depth_meters(depth_frame: Any) -> tuple[np.ndarray, np.ndarray]:
     raw = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
     expected = height * width
     if raw.size < expected:
-        raise RuntimeError(f"深度帧数据长度异常：收到 {raw.size} 像素，期望 {expected} ({width}x{height})")
+        raise RuntimeError(f"Unexpected depth frame size: got {raw.size} pixels, expected {expected} ({width}x{height})")
     raw_2d = raw[:expected].reshape((height, width))
     return raw_2d, raw_2d.astype(np.float32) * (scale_mm / 1000.0)
 
@@ -331,8 +331,8 @@ class OrbbecSession:
             except (ob.OBError, RuntimeError) as exc:
                 msg = str(exc)
                 if "busy" in msg.lower():
-                    raise RuntimeError("相机被占用，请关闭其他预览程序后再试。") from exc
-                raise RuntimeError(f"无法启动取流：{msg}") from exc
+                    raise RuntimeError("Camera is busy; close other preview applications and try again.") from exc
+                raise RuntimeError(f"Failed to start Orbbec pipeline: {msg}") from exc
 
             intr = self.color_profile.get_intrinsic()
             distortion = self.color_profile.get_distortion()
@@ -382,14 +382,14 @@ class OrbbecSession:
             if color is not None and (self.depth_profile is None or depth is not None):
                 break
         if color is None:
-            raise RuntimeError("Orbbec 取流超时或缺少彩色帧")
+            raise RuntimeError("Orbbec stream timed out or missing color frame")
         image = _frame_to_bgr(color)
         if image is None:
-            raise RuntimeError("Orbbec 彩色帧格式异常")
+            raise RuntimeError("Invalid Orbbec color frame format")
         depth_m = depth_raw = None
         if self.depth_profile is not None:
             if depth is None:
-                raise RuntimeError("Orbbec 缺少深度帧")
+                raise RuntimeError("Orbbec missing depth frame")
             depth_raw, depth_m = _extract_depth_meters(depth)
             self.metadata["sdk_depth_unit_m"] = float(depth.get_depth_scale()) / 1000.0
             self.metadata["depth_scale"] = self.metadata["sdk_depth_unit_m"]
@@ -412,8 +412,6 @@ class OrbbecSession:
             self.pipeline = None
         self.device = None
         self.ctx = None
-
-    close = stop
 
 
 class OrbbecCamera(ProcessCamera):

@@ -13,7 +13,6 @@ BACKENDS: dict[str, tuple[str, str | None]] = {
     "uvc": ("UVC Camera", None),
     "sim": ("Simulated RGB-D", None),
 }
-KINDS = BACKENDS
 
 PROFILES: dict[str, list[tuple[int, int, int]]] = {
     "realsense": [(1280, 720, 30), (1920, 1080, 30), (848, 480, 30), (640, 480, 60), (640, 480, 30)],
@@ -32,9 +31,9 @@ def availability() -> dict[str, bool]:
 
 def create_camera(backend: str, config: dict[str, Any]) -> Any:
     if backend not in BACKENDS:
-        raise ValueError(f"未知设备后端 {backend}")
+        raise ValueError(f"Unknown camera backend: {backend}")
     if not availability().get(backend):
-        raise RuntimeError(f"缺少 {BACKENDS[backend][1]}，该相机后端不可用")
+        raise RuntimeError(f"Missing {BACKENDS[backend][1]}; camera backend '{backend}' is unavailable")
     if backend == "realsense":
         from camera_tool.devices.realsense import RealSenseCamera
 
@@ -51,7 +50,7 @@ def create_camera(backend: str, config: dict[str, Any]) -> Any:
         from camera_tool.devices.sim import SimulatedRgbdCamera
 
         return SimulatedRgbdCamera(config)
-    raise ValueError(f"未知设备后端 {backend}")
+    raise ValueError(f"Unknown camera backend: {backend}")
 
 
 def device_resource(backend: str, serial: str) -> str:
@@ -75,7 +74,7 @@ def discover() -> dict[str, Any]:
                 )
                 if process.returncode:
                     detail = (process.stderr or process.stdout).strip().splitlines()
-                    raise RuntimeError(detail[-1] if detail else f"SDK 退出 {process.returncode}")
+                    raise RuntimeError(detail[-1] if detail else f"SDK exited with code {process.returncode}")
                 result.extend(json.loads(process.stdout.strip().splitlines()[-1]))
             except Exception as exc:
                 errors.append(f"{vendor}: {exc}")

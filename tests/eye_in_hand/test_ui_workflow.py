@@ -1,12 +1,15 @@
 """Desktop workflows use real services with synthetic hardware and Qt events."""
 from __future__ import annotations
+
 import threading
 import time
+
 import numpy as np
 import pytest
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
 from camera_tool.calibration.eye_in_hand.session import CalibrationSession
 from camera_tool.ui.main_window import MainWindow
 
@@ -15,7 +18,6 @@ def wait_until(predicate, timeout=15):
     deadline = time.monotonic() + timeout
     while not predicate() and time.monotonic() < deadline:
         QApplication.processEvents()
-        # Yield the GIL as well as processing Qt events for Python workers.
         time.sleep(.005)
     QApplication.processEvents()
     assert predicate(), "GUI task did not finish"
@@ -161,31 +163,31 @@ def test_replay_export_does_not_write_into_original_directory(window, tmp_path):
     after = {p.relative_to(folder): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
     assert before == after
     assert (tmp_path / "new.yaml").is_file()
-    with pytest.raises(RuntimeError, match="只读"):
+    with pytest.raises(RuntimeError, match="read-only"):
         window.payload["session"].export_result(window.payload["solution"], folder / "result.yaml")
 
 
 def test_stream_failure_stops_and_releases_devices(window, monkeypatch):
     camera, robot = window.backend.camera, window.backend.robot
     def fail(**kwargs):
-        raise RuntimeError("测试断流")
+        raise RuntimeError("Test stream failure")
     monkeypatch.setattr(camera, "read", fail)
     wait_until(lambda: not window.workers)
     assert not camera.connected and not robot.connected
-    assert "测试断流" in window.status_bar.currentMessage()
+    assert "Test stream failure" in window.status_bar.currentMessage()
     assert not window.btn_capture.isEnabled()
 
 
 def test_failed_motion_stops_without_capturing(window, monkeypatch):
     def fail(pose):
-        raise RuntimeError("测试机械臂异常")
+        raise RuntimeError("Test robot failure")
     robot = window.backend.robot
     monkeypatch.setattr(robot, "move_to_flange_pose", fail)
     window._command("auto")
     wait_until(lambda: not window.workers)
     assert not window.backend.session.samples
     assert not robot.connected
-    assert "测试机械臂异常" in window.status_bar.currentMessage()
+    assert "Test robot failure" in window.status_bar.currentMessage()
 
 
 def test_close_waits_for_motion_cleanup(window, monkeypatch):
@@ -230,3 +232,43 @@ def test_eye_to_hand_hides_unsupported_controls(window):
     assert window.result_panel.tbl_samples.isColumnHidden(0)
     assert not window.result_panel.tabs.isTabVisible(window.result_panel.tabs.indexOf(window.result_panel.tbl_methods))
     assert not window.result_panel.btn_export.isEnabled()
+
+
+def test_ui_defaults_to_english_and_switches_languages(window):
+    from camera_tool.ui.i18n import tr
+
+    assert window.lang == "en"
+    assert window.combo_lang.currentData() == "en"
+    assert window.nav_buttons[0].text() == tr("nav.preview", "en")
+    assert window.nav_buttons[1].text() == tr("nav.calibration", "en")
+    assert window.btn_capture.text() == tr("cal.btn_capture", "en")
+    assert window.video_panel.lang == "en"
+    assert window.scene3d_panel.lang == "en"
+    assert window.result_panel.lang == "en"
+
+    samples(window, 6)
+    solve(window)
+    window.select_sample(0)
+    assert "Hand-Eye Calibration Report" in window.result_panel.txt_report.toPlainText()
+    assert window.result_panel.btn_export.text() == tr("panel.btn_export", "en")
+
+    window.set_language("zh")
+    QApplication.processEvents()
+    assert window.lang == "zh"
+    assert window.combo_lang.currentData() == "zh"
+    assert window.nav_buttons[0].text() == tr("nav.preview", "zh")
+    assert window.nav_buttons[0].text() != tr("nav.preview", "en")
+    assert window.btn_capture.text() == tr("cal.btn_capture", "zh")
+    assert window.result_panel.btn_export.text() == tr("panel.btn_export", "zh")
+    assert tr("report.title", "zh") in window.result_panel.txt_report.toPlainText()
+    assert len(window.payload["samples"]) == 6
+    assert window.payload["solution"] is not None
+    window.resize(1280, 720)
+    QApplication.processEvents()
+    assert window.pages.width() <= window.width()
+
+    window.set_language("en")
+    QApplication.processEvents()
+    assert window.lang == "en"
+    assert window.nav_buttons[0].text() == tr("nav.preview", "en")
+    assert "Hand-Eye Calibration Report" in window.result_panel.txt_report.toPlainText()

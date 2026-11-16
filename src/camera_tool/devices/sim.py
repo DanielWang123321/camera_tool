@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import cv2
 import numpy as np
@@ -194,7 +195,7 @@ class SimulatedRobotController:
     def connect(self) -> dict[str, Any]:
         self.connected = True
         st = self.read_state()
-        self.event_cb("已启用仿真机械臂控制器 (末端防撞保护已激活)")
+        self.event_cb("Simulated robot controller enabled (tool collision guard active)")
         return {
             "ip": "SIM-LOCAL",
             "dof": self.dof,
@@ -209,7 +210,7 @@ class SimulatedRobotController:
         x_base_tcp = tcp_from_flange(self.current_flange, self.tcp_offset_mm_rad)
         safety = check_tool_safety(self.current_flange, self.tool_cfg)
         safety["safe"] = True
-        safety["message"] = "安全"
+        safety["message"] = "OK"
         return {
             "X_base_flange": self.current_flange.copy(),
             "X_base_tcp": x_base_tcp,

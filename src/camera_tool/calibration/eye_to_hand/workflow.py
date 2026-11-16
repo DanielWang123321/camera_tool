@@ -36,19 +36,19 @@ from camera_tool.core import (
     write_json,
 )
 from camera_tool.devices.robot import TcpCalibrationRobot
-from camera_tool.paths import DATA_ROOT, project_path, resource_path
+from camera_tool.paths import DATA_ROOT, output_path, resource_path
 
 
 def load_settings(path: str | Path) -> dict[str, Any]:
     config_file = resource_path(path)
     config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
     if not isinstance(config, dict):
-        raise CalibrationError("标定配置为空")
+        raise CalibrationError("Calibration configuration is empty")
 
     fixed_cfg = config.get("fixed_camera") or config.get("realsense")
     wrist_cfg = config.get("wrist_camera") or config.get("wrist")
     if not isinstance(fixed_cfg, dict) or not isinstance(wrist_cfg, dict):
-        raise CalibrationError("标定配置缺少 fixed_camera 或 wrist_camera 配置块")
+        raise CalibrationError("Calibration configuration is missing fixed_camera or wrist_camera section")
     config["fixed_camera"] = fixed_cfg
     config["realsense"] = fixed_cfg
     config["wrist_camera"] = wrist_cfg
@@ -78,7 +78,7 @@ def load_settings(path: str | Path) -> dict[str, Any]:
         "move_timeout_s",
     ):
         if not np.isfinite(motion[key]) or motion[key] <= 0:
-            raise CalibrationError(f"运动参数 {key} 必须为正数")
+            raise CalibrationError(f"Motion parameter {key} must be positive")
     if (
         not 60 <= motion["max_attempts"] <= 90
         or motion["speed_deg_s"] > 15
@@ -90,24 +90,24 @@ def load_settings(path: str | Path) -> dict[str, Any]:
         or motion["translation_step_m"] > 0.02
         or motion["rotation_step_deg"] > 6
     ):
-        raise CalibrationError("自动标定运动参数超过实现允许的保守范围")
+        raise CalibrationError("Auto-calibration motion parameters exceed conservative safety limits")
 
     frames = int(fixed_cfg["frames"])
     config["fixed_frames"] = frames
     config["realsense_frames"] = frames
     if not (5 <= frames <= 60):
-        raise CalibrationError("固定相机需要 5～60 帧")
+        raise CalibrationError("Fixed camera frame count must be between 5 and 60")
     if not (0.01 <= config["marker"]["side_m"] <= 0.5):
-        raise CalibrationError("标定码边长单位为米，当前值不合理")
+        raise CalibrationError("Marker side_m must be in meters within [0.01, 0.5]")
     width, height = wrist_cfg["rectified_size"]
     if not (128 <= width <= 1920 and 128 <= height <= 1920 and 30 <= wrist_cfg["rectified_fov_deg"] <= 120):
-        raise CalibrationError("腕部相机去畸变尺寸或视野范围无效")
+        raise CalibrationError("Invalid wrist camera rectified_size or rectified_fov_deg")
     raw_w, raw_h = wrist_cfg["capture_size"]
     if not (128 <= raw_w <= 4096 and 128 <= raw_h <= 2160):
-        raise CalibrationError("腕部相机原图尺寸无效")
+        raise CalibrationError("Invalid wrist camera capture_size")
     for key, value in config["checks"].items():
         if not np.isfinite(value) or (key != "table_z_m" and value <= 0):
-            raise CalibrationError(f"验收参数无效：{key}")
+            raise CalibrationError(f"Invalid verification threshold: {key}")
     return config
 
 
@@ -120,7 +120,7 @@ def color_metadata(native: dict[str, Any]) -> dict[str, Any]:
         elif ci["model"] == "distortion.brown_conrady":
             model = "brown_conrady"
         else:
-            raise CalibrationError(f"固定相机彩色畸变模型尚不支持：{ci['model']}，不能忽略畸变")
+            raise CalibrationError(f"Unsupported fixed camera color distortion model: {ci['model']}")
         return {
             "serial": native["serial"],
             "width": ci["width"],
@@ -135,7 +135,7 @@ def color_metadata(native: dict[str, Any]) -> dict[str, Any]:
     if np.all(coefficients == 0):
         model = "pinhole"
     elif model not in ("pinhole", "brown_conrady"):
-        raise CalibrationError(f"固定相机彩色畸变模型尚不支持：{model}，不能忽略畸变")
+        raise CalibrationError(f"Unsupported fixed camera color distortion model: {model}")
     return {
         "serial": str(native.get("serial", "")),
         "width": int(native["width"]),
@@ -158,9 +158,9 @@ def make_depth_geometry(metadata: dict[str, Any]) -> dict[str, np.ndarray]:
 
         ci = native["native_depth"]
         if ci["model"] not in ("distortion.none", "distortion.brown_conrady", "distortion.inverse_brown_conrady"):
-            raise CalibrationError(f"原始深度反投影暂不支持此畸变模型：{ci['model']}")
+            raise CalibrationError(f"Unsupported raw depth distortion model for deprojection: {ci['model']}")
         if not np.isfinite(native["depth_scale"]) or native["depth_scale"] <= 0:
-            raise CalibrationError("原始深度的单位比例无效")
+            raise CalibrationError("Invalid raw depth unit scale")
         intr = rs.intrinsics()
         for key in ("width", "height", "fx", "fy", "ppx", "ppy", "coeffs"):
             setattr(intr, key, ci[key])
@@ -169,7 +169,7 @@ def make_depth_geometry(metadata: dict[str, Any]) -> dict[str, np.ndarray]:
         pixels = np.column_stack([x.ravel(), y.ravel()])
         rays = np.asarray([rs.rs2_deproject_pixel_to_point(intr, [float(u), float(v)], 1.0) for u, v in pixels])
         if not np.isfinite(rays).all() or not np.allclose(rays[:, 2], 1.0):
-            raise CalibrationError("原始深度反投影失败")
+            raise CalibrationError("Raw depth ray deprojection failed")
         return {"pixels": pixels, "rays": rays}
 
     cam = CameraModel(metadata)
@@ -187,10 +187,10 @@ def depth_points(native_depth: np.ndarray | None, geometry: Any, metadata: dict[
     else:
         expected_shape = (int(metadata["height"]), int(metadata["width"]))
     if native_depth is None or native_depth.shape != expected_shape:
-        raise CalibrationError("原始深度尺寸与内参不一致")
+        raise CalibrationError("Raw depth shape does not match intrinsics")
     pixels, rays = geometry["pixels"], geometry["rays"]
     if pixels.shape != (len(rays), 2) or rays.shape[1:] != (3,) or not np.isfinite(rays).all():
-        raise CalibrationError("保存的深度射线数据无效")
+        raise CalibrationError("Saved depth ray geometry is invalid")
     scale = float(native.get("depth_scale", 0.001))
     depth = native_depth[pixels[:, 1], pixels[:, 0]] * scale
     x_color_depth = valid_transform(native.get("X_color_depth", np.eye(4)))
@@ -211,9 +211,9 @@ def capture_consistency(
         or deg > motion["settle_rotation_deg"]
         or np.rad2deg(np.abs(np.asarray(before["joints_rad"]) - after["joints_rad"])).max() > 0.1
     ):
-        raise RejectedSample("曝光前后机械臂有移动")
+        raise RejectedSample("Robot moved between pre- and post-exposure readings")
     if not before["read_end_mono"] <= host_timestamp <= after["read_start_mono"]:
-        raise CalibrationError("图像曝光时间不在两次 TCP 读取之间，停止不同步采样")
+        raise CalibrationError("Image exposure timestamp is not bracketed by TCP reads; aborting unsynchronized sample")
 
 
 def clamp_workspace(pose: np.ndarray, config: dict[str, Any]) -> np.ndarray:
@@ -274,7 +274,7 @@ def sample_candidate(anchor: np.ndarray, index: int, preliminary: dict[str, Any]
     original = anchor @ wrist
     distance = float((inv(original) @ board)[2, 3])
     if not 0.12 < distance < 1.5:
-        raise CalibrationError("初步解中的拍摄距离异常")
+        raise CalibrationError("Invalid camera-to-board distance in preliminary solution")
     r = original[:3, :3] @ rotation
     camera = transform(r, board[:3, 3] - r @ np.array([offset[0], offset[1], distance + offset[2]]))
     return camera @ inv(wrist)
@@ -311,7 +311,7 @@ class LiveCalibration:
     def start(self) -> None:
         if self.context:
             self.context.check()
-        self.session.event("读取腕部相机内参并开流")
+        self.session.event("Loading wrist camera intrinsics and starting stream")
         self.wrist.start()
         self.session.manifest["wrist_camera"] = self.wrist.metadata
         self.session.save()
@@ -331,14 +331,14 @@ class LiveCalibration:
 
         self.session.manifest["robot"] = self.robot.start()
         self.session.save()
-        self.session.event("设备参数和机械臂只读检查通过")
+        self.session.event("Device parameters and read-only robot checks passed")
 
     def fixed_frame(self, after_mono: float = 0.0) -> dict[str, Any]:
         if self.context:
             self.context.check()
         frame = self.fixed.get_frame(after_frame_number=self.fixed_number, after_mono=after_mono, wait_s=2.0, max_age_s=0.3)
         if frame is None:
-            raise CalibrationError(f"固定相机断流或没有新帧：{self.fixed.last_error or '等待超时'}")
+            raise CalibrationError(f"Fixed camera stalled or produced no new frame: {self.fixed.last_error or 'timeout'}")
         self.fixed_number = frame["frame_number"]
         if self.context:
             self.context.frame("fixed", frame)
@@ -376,7 +376,7 @@ class LiveCalibration:
         capture_consistency(before, after, packet["host_timestamp"], self.config["motion"])
         sample.update(self.wrist_detector.detect(packet["color"]))
         if sample["sha256"] in self.seen_hashes:
-            raise RejectedSample("重复图像，不能当作新姿态")
+            raise RejectedSample("Duplicate image; cannot accept as a new pose")
         self.seen_hashes.add(sample["sha256"])
         return sample
 
@@ -399,11 +399,14 @@ class LiveCalibration:
         }
         self.session.save()
         marker_id = self.config["marker"]["id"]
-        print(f"腕部相机已识别码 {marker_id}，角点投影 {wrist['pnp_rms_px']:.3f} px", flush=True)
+        print(f"Wrist camera detected marker {marker_id}; PnP RMS = {wrist['pnp_rms_px']:.3f} px", flush=True)
         if fixed_visibility["visible"]:
-            print(f"固定相机已识别码 {marker_id}，角点投影 {fixed_visibility['pnp_rms_px']:.3f} px", flush=True)
+            print(
+                f"Fixed camera detected marker {marker_id}; PnP RMS = {fixed_visibility['pnp_rms_px']:.3f} px",
+                flush=True,
+            )
         else:
-            print(f"固定相机当前未看到码：{fixed_visibility['reason']}", flush=True)
+            print(f"Fixed camera cannot currently detect marker: {fixed_visibility['reason']}", flush=True)
         return self.session.manifest["check"]
 
     def monitor_static_board(self, name: str) -> None:
@@ -420,7 +423,7 @@ class LiveCalibration:
             > self.config["checks"]["static_corner_drift_px"]
         ):
             self.session.image(f"{name}_board_moved.png", frame["color"])
-            raise CalibrationError("固定相机发现标定板或相机移动，停止整次标定")
+            raise CalibrationError("Fixed camera detected board or camera movement; aborting calibration")
 
     def collect_wrist(self) -> list[dict[str, Any]]:
         samples = self.session.manifest["samples"]
@@ -443,18 +446,18 @@ class LiveCalibration:
                 target = search_candidate(search_index, self.config["motion"])
                 search_index += 1
                 if target is None:
-                    raise CalibrationError("有限搜索结束，未找到完整标定码")
+                    raise CalibrationError("Bounded search finished without finding full calibration marker")
             else:
                 target = sample_candidate(anchor, local_index, preliminary)
                 local_index += 1
             assert target is not None
             target = clamp_workspace(target, self.config["motion"])
-            self.session.event("检查候选姿态", attempt=attempt, target=target)
+            self.session.event("Checking candidate pose", attempt=attempt, target=target)
             try:
                 if preliminary is not None and not predicted_visible(
                     target, preliminary, self.wrist_model, self.config["marker"]["side_m"]
                 ):
-                    raise RejectedSample("预计标定板超出腕部相机视野")
+                    raise RejectedSample("Marker predicted to fall outside wrist camera field of view")
                 current = self.robot.read()["X_base_tcp"]
                 mm, deg = pose_error(current, target)
                 if mm < 2.0 and deg < 1.0:
@@ -465,14 +468,14 @@ class LiveCalibration:
                 for old in samples:
                     mm, deg = pose_error(np.asarray(old["X_base_tcp"]), sample["X_base_tcp"])
                     if mm < 8.0 and deg < 3.0:
-                        raise RejectedSample("姿态与已有样本太接近")
+                        raise RejectedSample("Pose is too close to an existing sample")
             except RejectedSample as exc:
-                self.session.event("跳过候选", attempt=attempt, reason=str(exc))
+                self.session.event("Skipped candidate pose", attempt=attempt, reason=str(exc))
                 continue
             sample.update(id=len(samples), attempt=attempt, role="check" if len(samples) % 5 == 4 else "train")
             samples.append(sample)
             self.session.save()
-            self.session.event("保存有效姿态", count=len(samples), role=sample["role"])
+            self.session.event("Saved valid pose", count=len(samples), role=sample["role"])
             self.monitor_static_board(name)
             if anchor is None:
                 anchor = sample["X_base_tcp"]
@@ -485,12 +488,14 @@ class LiveCalibration:
                     )
                     if rough["fit_rms_px"] < 2.0:
                         preliminary = rough
-                        self.session.event("已有初步解，扩大拍摄角度", training_count=len(training))
+                        self.session.event("Preliminary solution ready; expanding viewpoint angles", training_count=len(training))
                 except CalibrationError as exc:
-                    self.session.event("继续小范围采样", reason=str(exc))
+                    self.session.event("Continuing local sampling", reason=str(exc))
             if len(samples) == 30:
                 return samples
-        raise CalibrationError(f"{self.config['motion']['max_attempts']} 个候选已用完，仅采到 {len(samples)} 个有效姿态")
+        raise CalibrationError(
+            f"Exhausted {self.config['motion']['max_attempts']} candidates with only {len(samples)} valid poses"
+        )
 
     def capture_fixed_samples(self) -> list[dict[str, Any]]:
         samples = self.session.manifest["fixed_samples"]
@@ -508,9 +513,9 @@ class LiveCalibration:
                 detection = self.fixed_detector.detect(frame["color"])
                 digest = image_hash(frame["color"])
                 if digest in hashes:
-                    raise RejectedSample("固定相机重复图像")
+                    raise RejectedSample("Duplicate fixed camera frame")
             except RejectedSample as exc:
-                self.session.event("跳过固定相机图像", image=image_name, reason=str(exc))
+                self.session.event("Skipped fixed camera frame", image=image_name, reason=str(exc))
                 continue
             hashes.add(digest)
             sample = {
@@ -527,7 +532,7 @@ class LiveCalibration:
                 and np.linalg.norm(np.asarray(sample["corners"]) - self.fixed_initial_corners, axis=1).max()
                 > self.config["checks"]["static_corner_drift_px"]
             ):
-                raise CalibrationError("板或固定相机在腕部采样后移动")
+                raise CalibrationError("Board or fixed camera moved after wrist sampling")
             samples.append(sample)
             self.session.manifest["realsense"] = samples
             self.session.save()
@@ -543,7 +548,7 @@ class LiveCalibration:
                     }
                     for s in samples
                 ]
-        raise CalibrationError("机械臂让开后，固定相机仍未取得足够有效图像")
+        raise CalibrationError("Fixed camera failed to collect enough valid frames after robot parked")
 
     def run(self) -> dict[str, Any]:
         assert self.wrist.metadata is not None
@@ -551,7 +556,7 @@ class LiveCalibration:
         samples = self.collect_wrist()
         solution = solve_wrist(samples, self.wrist.metadata, self.config)
         write_json(self.session.path / "wrist_result.json", solution)
-        self.session.event("腕部标定和 6 个独立姿态检查通过", report=solution["independent_check"])
+        self.session.event("Wrist calibration and 6-pose hold-out check passed", report=solution["independent_check"])
 
         witness_pose = np.asarray(samples[-1]["X_base_tcp"])
         park = transform(
@@ -563,7 +568,7 @@ class LiveCalibration:
         result = {**solution, **solve_fixed_camera(fixed_samples, self.fixed_meta, solution, self.config)}
         if not result["depth_ok"]:
             self.session.event(
-                "深度核对未达门槛，仍发布刚体外参",
+                "Depth consistency check below threshold; still publishing rigid extrinsics",
                 report=result["depth_checks"][:1],
                 depth_scale=result["depth_scale"],
                 warnings=result["depth_warnings"],
@@ -578,7 +583,7 @@ class LiveCalibration:
             self.config["marker"]["side_m"],
             solution,
             self.config["checks"],
-            "交接后腕部复核",
+            "Post-handover wrist witness check",
         )
         self.robot.move(park, self.health)
         final = self.fixed_frame(after_mono=time.monotonic())
@@ -588,7 +593,7 @@ class LiveCalibration:
             np.linalg.norm(np.asarray(final_corners) - fixed_samples[0]["corners"], axis=1).max()
             > self.config["checks"]["static_corner_drift_px"]
         ):
-            raise CalibrationError("收尾时标定板或固定相机移动")
+            raise CalibrationError("Board or fixed camera moved at end of calibration")
         final_record = {"image": "final_fixed.png", "corners": final_corners}
         self.session.manifest["final_fixed"] = final_record
         self.session.manifest["final_realsense"] = final_record
@@ -607,30 +612,30 @@ class LiveCalibration:
     def close(self, failed: bool) -> None:
         if failed:
             self.robot.stop()
-        for name, close in (("机械臂", self.robot.close), ("固定相机", self.fixed.stop), ("腕部相机", self.wrist.stop)):
+        for name, close in (("robot", self.robot.close), ("fixed camera", self.fixed.stop), ("wrist camera", self.wrist.stop)):
             try:
                 close()
             except Exception as exc:
-                self.session.event(f"关闭{name}失败", reason=str(exc))
+                self.session.event(f"Failed to close {name}", reason=str(exc))
 
 
 def read_image(directory: Path, name: str, flags: int = cv2.IMREAD_COLOR) -> np.ndarray:
-    path = project_path(directory / name)
+    path = output_path(directory / name)
     if not path.is_relative_to(directory.resolve()):
-        raise CalibrationError("回放图像路径超出运行目录")
+        raise CalibrationError("Replay image path escapes session directory")
     image = cv2.imread(str(path), flags)
     if image is None:
-        raise CalibrationError(f"回放图像缺失或损坏：{path}")
+        raise CalibrationError(f"Replay image missing or unreadable: {path}")
     return image
 
 
 def replay(source: str | Path, session: Session) -> dict[str, Any]:
-    source = project_path(source)
+    source = output_path(source)
     if source.is_file():
         source = source.parent
     manifest = read_json(source / "session.json")
     if manifest.get("schema") != 1:
-        raise CalibrationError("不支持此记录版本")
+        raise CalibrationError("Unsupported session schema version")
     config = manifest["config"]
     fixed_cfg = config.get("fixed_camera") or config.get("realsense") or {}
     config["fixed_frames"] = int(
@@ -643,7 +648,7 @@ def replay(source: str | Path, session: Session) -> dict[str, Any]:
     with np.load(source / "wrist_rectification.npz", allow_pickle=False) as data:
         mapping = data["mapping"]
     if mapping.shape != (camera.height, camera.width, 2) or not np.isfinite(mapping).all():
-        raise CalibrationError("保存的腕部相机去畸变映射无效")
+        raise CalibrationError("Saved wrist camera undistortion mapping is invalid")
 
     seen: set[str] = set()
     frames: set[Any] = set()
@@ -652,7 +657,7 @@ def replay(source: str | Path, session: Session) -> dict[str, Any]:
         raw = read_image(source, item["raw_image"])
         digest = image_hash(raw)
         if digest != item["sha256"] or digest in seen or item["frame_number"] in frames:
-            raise CalibrationError("回放中存在重复帧或原始图像被更改")
+            raise CalibrationError("Duplicate frame or modified raw image found in replay")
         seen.add(digest)
         frames.add(item["frame_number"])
         image = cv2.remap(raw, mapping, None, cv2.INTER_LINEAR)
@@ -672,7 +677,7 @@ def replay(source: str | Path, session: Session) -> dict[str, Any]:
             image = read_image(source, item["image"])
             digest = image_hash(image)
             if digest != item["sha256"] or digest in seen_fixed or item["frame_number"] in numbers:
-                raise CalibrationError("固定相机回放中存在重复帧或图像被更改")
+                raise CalibrationError("Duplicate frame or modified image found in fixed camera replay")
             seen_fixed.add(digest)
             numbers.add(item["frame_number"])
             depth = read_image(source, item["native_depth_image"], cv2.IMREAD_UNCHANGED)
@@ -688,19 +693,19 @@ def replay(source: str | Path, session: Session) -> dict[str, Any]:
     witness = manifest.get("witness")
     final_record = manifest.get("final_fixed") or manifest.get("final_realsense")
     if witness is None or final_record is None:
-        raise CalibrationError("记录缺少相机交接后的腕部复核或收尾图像，不能验收完整标定")
+        raise CalibrationError("Session lacks post-handover wrist witness or final fixed image; cannot verify full calibration")
     raw = read_image(source, witness["raw_image"])
     witness = {**witness, **MarkerDetector(config["marker"], camera).detect(cv2.remap(raw, mapping, None, cv2.INTER_LINEAR))}
     capture_consistency(witness["before"], witness["after"], witness["host_timestamp"], config["motion"])
     result["witness_check"] = check_samples(
-        [witness], camera, config["marker"]["side_m"], solution, config["checks"], "交接后腕部复核"
+        [witness], camera, config["marker"]["side_m"], solution, config["checks"], "Post-handover wrist witness check"
     )
     final = MarkerDetector(config["marker"], fixed_model).detect(read_image(source, final_record["image"]))
     if (
         np.linalg.norm(np.asarray(final["corners"]) - fixed_samples[0]["corners"], axis=1).max()
         > config["checks"]["static_corner_drift_px"]
     ):
-        raise CalibrationError("回放收尾图像发现板或相机移动")
+        raise CalibrationError("Board or camera moved in final replay check frame")
     result.update(passed=True, published=False, source=str(source), units="m")
     session.manifest.update(source=str(source), config=config)
     session.save()
@@ -708,15 +713,15 @@ def replay(source: str | Path, session: Session) -> dict[str, Any]:
 
 
 def publish_camera(path: str | Path, result: dict[str, Any], session: Session) -> str:
-    target = project_path(path)
+    target = output_path(path)
     if session.manifest["mode"] != "live" or result.get("passed") is not True:
-        raise CalibrationError("只有完整实机流程通过几何检查后才能发布外参")
+        raise CalibrationError("Extrinsics can only be published from a complete live hardware run that passed geometry checks")
     fixed_serial = result.get("fixed_serial") or result.get("realsense_serial")
     if fixed_serial is None:
-        raise CalibrationError("发布外参缺少必要检查/设备信息：fixed_serial")
+        raise CalibrationError("Missing required check/device metadata to publish extrinsics: fixed_serial")
     for name in ("independent_check", "witness_check", "wrist_serial", "X_base_camera"):
         if result.get(name) is None:
-            raise CalibrationError(f"发布外参缺少必要检查/设备信息：{name}")
+            raise CalibrationError(f"Missing required check/device metadata to publish extrinsics: {name}")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     original = target.read_bytes() if target.is_file() else b""
@@ -753,7 +758,7 @@ def publish_camera(path: str | Path, result: dict[str, Any], session: Session) -
         "depth_ok": bool(result.get("depth_ok")),
         "sdk_depth_unit_m": fixed_meta.get("native", {}).get("depth_scale"),
         "depth_scale_correction": float(result["depth_scale"]),
-        "depth_scale_note": "把对齐到彩色的深度（米）乘以此系数后再变到基座；不乘则桌面高度可能有数毫米偏差。",
+        "depth_scale_note": "Multiply color-aligned depth (m) by this factor before transforming to base frame; omitting it may cause several mm tabletop Z offset.",
     }
     if original:
         backup = session.path / "camera.before.yaml"
@@ -761,18 +766,18 @@ def publish_camera(path: str | Path, result: dict[str, Any], session: Session) -
             f.write(original)
             f.flush()
             os.fsync(f.fileno())
-    tmp = project_path(target.with_name(target.name + f".autocalib.{session.path.name}.tmp"))
+    tmp = output_path(target.with_name(target.name + f".autocalib.{session.path.name}.tmp"))
     created = False
     try:
         with tmp.open("x", encoding="utf-8") as f:
             created = True
-            f.write("# Eye-to-Hand 标定结果。点_base = X_base_camera @ 点_camera（彩色光心），位置单位米。\n")
-            f.write("# 点云已对齐到彩色，不要再乘出厂 depth→color。TCP 为控制器实际工具坐标。\n")
+            f.write("# Eye-to-Hand calibration result. p_base = X_base_camera @ p_camera (color optical center, meters).\n")
+            f.write("# Point clouds are already aligned to color; do not apply factory depth->color extrinsics. TCP is controller actual TCP.\n")
             yaml.safe_dump(raw, f, allow_unicode=True, sort_keys=False)
             f.flush()
             os.fsync(f.fileno())
         if target.is_file() and target.read_bytes() != original:
-            raise CalibrationError("写入前发现输出文件改变，取消覆盖")
+            raise CalibrationError("Output file changed externally before write; aborting overwrite")
         os.replace(tmp, target)
     finally:
         if created and tmp.exists():

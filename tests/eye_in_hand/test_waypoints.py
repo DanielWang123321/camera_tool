@@ -30,7 +30,6 @@ def test_robot_profiles_registry_and_legacy_aliases() -> None:
     assert profiles["arm_compact_6dof"]["reach_mm"] == 440
     assert profiles["arm_long_6dof"]["reach_mm"] == 850
 
-    # Legacy alias maps cleanly to arm_6dof
     planner.select_model("xarm6")
     assert planner.current_model == "arm_6dof"
 

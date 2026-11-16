@@ -1,6 +1,3 @@
-# Medium-Range Eye-in-Hand Flange Waypoints (optical distance ~410-530 mm)
-# Poses are in FLANGE coordinates [x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg] (extrinsic 'xyz').
-
 profile: "arm_6dof"
 dof: 6
 device_type: 6

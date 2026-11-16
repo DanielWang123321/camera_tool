@@ -1,9 +1,15 @@
 """Compare camera geometry to the installed RealSense SDK without using hardware."""
 import numpy as np
-import pytest
 import pyrealsense2 as rs
+import pytest
 
-from camera_tool.core import CameraModel, marker_object_points, pose_error, pose_from_mm_deg, transform_points
+from camera_tool.core import (
+    CameraModel,
+    marker_object_points,
+    pose_error,
+    pose_from_mm_deg,
+    transform_points,
+)
 
 
 def camera_metadata(model):

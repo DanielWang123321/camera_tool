@@ -20,14 +20,14 @@ from camera_tool.core import (
     pose_to_mm_deg,
     valid_transform,
 )
-from camera_tool.paths import project_path
+from camera_tool.paths import output_path
 
 
 class CalibrationSession:
     """Manages captured calibration samples, disk persistence, and result export."""
 
     def __init__(self, base_dir: str | Path = "runs/eye_in_hand") -> None:
-        self.base_dir = project_path(base_dir)
+        self.base_dir = output_path(base_dir)
         self.session_dir: Path | None = None
         self.samples: list[dict[str, Any]] = []
         self.camera_metadata: dict[str, Any] | None = None
@@ -125,11 +125,11 @@ class CalibrationSession:
 
     @classmethod
     def load_replay(cls, run_dir: str | Path) -> CalibrationSession:
-        folder = project_path(run_dir)
+        folder = output_path(run_dir)
         meta_path = folder / "session_meta.json"
         samples_path = folder / "samples.json"
         if not meta_path.exists():
-            raise CalibrationError(f"回放目录缺少 session_meta.json: {folder}")
+            raise CalibrationError(f"Replay directory missing session_meta.json: {folder}")
 
         session = cls(base_dir=folder.parent)
         session.session_dir = folder
@@ -142,7 +142,7 @@ class CalibrationSession:
         for item in raw_samples:
             img_file = (folder / item["image_path"]).resolve()
             if not img_file.is_relative_to(folder.resolve()):
-                raise CalibrationError("回放图像路径超出会话目录")
+                raise CalibrationError("Replay image path escapes session directory")
             item["color_bgr"] = cv2.imread(str(img_file), cv2.IMREAD_COLOR) if img_file.exists() else None
             item["X_base_flange"] = valid_transform(np.asarray(item["X_base_flange"], dtype=float))
             item["X_base_tcp"] = valid_transform(
@@ -156,13 +156,13 @@ class CalibrationSession:
     def export_result(
         self,
         solution: dict[str, Any],
-        output_path: str | Path = "result/eye_in_hand.yaml",
+        result_file: str | Path = "result/eye_in_hand.yaml",
         tcp_offset_override_mm_rad: list[float] | np.ndarray | None = None,
         cfg: dict[str, Any] | None = None,
     ) -> Path:
-        out = project_path(output_path)
+        out = output_path(result_file)
         if self.read_only and self.session_dir is not None and out.resolve().is_relative_to(self.session_dir.resolve()):
-            raise CalibrationError("回放源目录保持只读，请将结果导出到其他目录")
+            raise CalibrationError("Replay source directory is read-only; export results to another directory")
         out.parent.mkdir(parents=True, exist_ok=True)
         self.last_solution = solution
 

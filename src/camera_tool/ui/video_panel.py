@@ -5,9 +5,19 @@ from typing import Any
 
 import cv2
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QImage, QPixmap, QResizeEvent
-from PySide6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+from camera_tool.ui.i18n import DEFAULT_LANG, normalize_lang, tr
 
 
 def numpy_bgr_to_qpixmap(bgr: np.ndarray, target_w: int, target_h: int) -> QPixmap:
@@ -61,9 +71,19 @@ def colorize_depth(depth_m: np.ndarray, max_depth_m: float = 0.80) -> np.ndarray
 class GateIndicator(QFrame):
     """Single-line metric with a textual pass/fail state and a threshold tooltip."""
 
-    def __init__(self, title: str, unit: str, threshold: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        unit: str,
+        threshold: str,
+        parent: QWidget | None = None,
+        lang: str = DEFAULT_LANG,
+    ) -> None:
         super().__init__(parent)
         self.unit = unit
+        self.lang = normalize_lang(lang)
+        self._last_value: str | None = None
+        self._last_passed: bool | None = None
         self.setObjectName("qualityGate")
         self.setToolTip(threshold)
         layout = QHBoxLayout(self)
@@ -76,12 +96,23 @@ class GateIndicator(QFrame):
         layout.addStretch()
         layout.addWidget(self.val_lbl)
 
+    def set_labels(self, title: str, threshold: str, lang: str) -> None:
+        self.lang = normalize_lang(lang)
+        self.title_lbl.setText(title)
+        self.setToolTip(threshold)
+        if self._last_value is not None and self._last_passed is not None:
+            self.update_gate(self._last_value, self._last_passed)
+
     def reset(self) -> None:
+        self._last_value = None
+        self._last_passed = None
         self.val_lbl.setText("—")
         self.val_lbl.setStyleSheet("color: #939ba9;")
 
     def update_gate(self, value_text: str, passed: bool) -> None:
-        state = "通过" if passed else "未通过"
+        self._last_value = value_text
+        self._last_passed = passed
+        state = tr("video.gate_pass" if passed else "video.gate_fail", self.lang)
         self.val_lbl.setText(f"{value_text} {self.unit} · {state}".replace("  ", " "))
         self.val_lbl.setStyleSheet(f"color: {'#8fc9a2' if passed else '#ec9898'};")
 
@@ -95,19 +126,56 @@ class VideoPanel(QWidget):
         tool_cfg: dict[str, Any],
         max_depth_m: float = 0.80,
         parent: QWidget | None = None,
+        lang: str = DEFAULT_LANG,
     ) -> None:
         super().__init__(parent)
         self.marker_cfg = marker_cfg
         self.tool_cfg = tool_cfg
         self.max_depth_m = float(max_depth_m)
+        self.lang = normalize_lang(lang)
         self._annotated_bgr: np.ndarray | None = None
         self._depth_m: np.ndarray | None = None
+        self._last_eval: dict[str, Any] | None = None
+        self._last_safety: dict[str, Any] | None = None
+        self._last_error: str | None = None
         self._build_ui()
 
     def _marker_summary(self) -> str:
         marker_id = self.marker_cfg.get("id", 398)
         side_mm = float(self.marker_cfg.get("side_m", 0.15)) * 1000.0
         return f"ArUco #{marker_id} · {side_mm:.0f} mm"
+
+    def set_language(self, lang: str) -> None:
+        self.lang = normalize_lang(lang)
+        with QSignalBlocker(self.view_mode_combo):
+            self.view_mode_combo.setItemText(0, tr("video.view_rgb", self.lang))
+            self.view_mode_combo.setItemText(1, tr("video.view_depth", self.lang))
+            self.view_mode_combo.setItemText(2, tr("video.view_both", self.lang))
+        self.view_mode_combo.setAccessibleName(tr("video.view_acc", self.lang))
+        self.gate_area.set_labels(
+            tr("video.gate_area", self.lang),
+            tr("video.tip_area", self.lang, val=self.marker_cfg["min_area_px"]),
+            self.lang,
+        )
+        self.gate_sharp.set_labels(
+            tr("video.gate_sharp", self.lang),
+            tr("video.tip_sharp", self.lang, val=self.marker_cfg["min_sharpness"]),
+            self.lang,
+        )
+        self.gate_rms.set_labels(
+            tr("video.gate_rms", self.lang),
+            tr("video.tip_rms", self.lang, val=self.marker_cfg["max_pnp_rms_px"]),
+            self.lang,
+        )
+        if self._last_error is not None:
+            self.show_error(self._last_error)
+        elif self._last_eval is not None and self._annotated_bgr is not None:
+            self._apply_evaluation(self._last_eval, self._last_safety)
+        else:
+            self.status_badge.setText(tr("video.waiting", self.lang))
+            if self.video_lbl.image_bgr is None:
+                self.video_lbl.setText(tr("video.disconnected", self.lang))
+            self.lbl_reason.setText(self._marker_summary())
 
     def configure(
         self,
@@ -118,9 +186,9 @@ class VideoPanel(QWidget):
         self.marker_cfg = marker_cfg
         self.tool_cfg = tool_cfg
         self.max_depth_m = float(max_depth_m)
-        self.gate_area.setToolTip(f"标定板面积 ≥ {self.marker_cfg['min_area_px']} px²")
-        self.gate_sharp.setToolTip(f"Laplacian 方差 ≥ {self.marker_cfg['min_sharpness']}")
-        self.gate_rms.setToolTip(f"单帧重投影 RMS ≤ {self.marker_cfg['max_pnp_rms_px']} px")
+        self.gate_area.setToolTip(tr("video.tip_area", self.lang, val=self.marker_cfg["min_area_px"]))
+        self.gate_sharp.setToolTip(tr("video.tip_sharp", self.lang, val=self.marker_cfg["min_sharpness"]))
+        self.gate_rms.setToolTip(tr("video.tip_rms", self.lang, val=self.marker_cfg["max_pnp_rms_px"]))
         self._render_frame()
 
     def _build_ui(self) -> None:
@@ -128,24 +196,41 @@ class VideoPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
         header = QHBoxLayout()
-        self.status_badge = QLabel("等待相机")
+        self.status_badge = QLabel(tr("video.waiting", self.lang))
         self.status_badge.setObjectName("muted")
         self.view_mode_combo = QComboBox()
-        self.view_mode_combo.addItems(["RGB", "深度", "RGB + 深度"])
-        self.view_mode_combo.setAccessibleName("相机显示模式")
+        self.view_mode_combo.addItems(
+            [tr("video.view_rgb", self.lang), tr("video.view_depth", self.lang), tr("video.view_both", self.lang)]
+        )
+        self.view_mode_combo.setAccessibleName(tr("video.view_acc", self.lang))
         self.view_mode_combo.currentIndexChanged.connect(self._render_frame)
         header.addWidget(self.status_badge)
         header.addStretch()
         header.addWidget(self.view_mode_combo)
         root.addLayout(header)
-        self.video_lbl = ImagePreview("未连接相机\n连接设备后显示实时画面")
+        self.video_lbl = ImagePreview(tr("video.disconnected", self.lang))
         root.addWidget(self.video_lbl, stretch=1)
 
         gates = QHBoxLayout()
         gates.setSpacing(8)
-        self.gate_area = GateIndicator("面积", "px²", f"标定板面积 ≥ {self.marker_cfg['min_area_px']} px²")
-        self.gate_sharp = GateIndicator("清晰度", "", f"Laplacian 方差 ≥ {self.marker_cfg['min_sharpness']}")
-        self.gate_rms = GateIndicator("PnP RMS", "px", f"单帧重投影 RMS ≤ {self.marker_cfg['max_pnp_rms_px']} px")
+        self.gate_area = GateIndicator(
+            tr("video.gate_area", self.lang),
+            "px²",
+            tr("video.tip_area", self.lang, val=self.marker_cfg["min_area_px"]),
+            lang=self.lang,
+        )
+        self.gate_sharp = GateIndicator(
+            tr("video.gate_sharp", self.lang),
+            "",
+            tr("video.tip_sharp", self.lang, val=self.marker_cfg["min_sharpness"]),
+            lang=self.lang,
+        )
+        self.gate_rms = GateIndicator(
+            tr("video.gate_rms", self.lang),
+            "px",
+            tr("video.tip_rms", self.lang, val=self.marker_cfg["max_pnp_rms_px"]),
+            lang=self.lang,
+        )
         for gate in (self.gate_area, self.gate_sharp, self.gate_rms):
             gates.addWidget(gate, stretch=1)
         root.addLayout(gates)
@@ -154,18 +239,22 @@ class VideoPanel(QWidget):
         self.lbl_reason.setObjectName("muted")
         root.addWidget(self.lbl_reason)
 
-    def reset(self, message: str = "未连接相机\n连接设备后显示实时画面") -> None:
+    def reset(self, message: str | None = None) -> None:
         self._annotated_bgr = None
         self._depth_m = None
-        self.video_lbl.reset(message)
-        self.status_badge.setText("等待相机")
+        self._last_eval = None
+        self._last_safety = None
+        self._last_error = None
+        self.video_lbl.reset(message if message is not None else tr("video.disconnected", self.lang))
+        self.status_badge.setText(tr("video.waiting", self.lang))
         self.status_badge.setStyleSheet("")
         self.lbl_reason.setText(self._marker_summary())
         for gate in (self.gate_area, self.gate_sharp, self.gate_rms):
             gate.reset()
 
     def show_error(self, reason: str) -> None:
-        self.status_badge.setText("取流异常")
+        self._last_error = reason
+        self.status_badge.setText(tr("video.stream_error", self.lang))
         self.status_badge.setStyleSheet("color: #ec9898;")
         self.lbl_reason.setText(reason)
         for gate in (self.gate_area, self.gate_sharp, self.gate_rms):
@@ -182,15 +271,11 @@ class VideoPanel(QWidget):
             display = np.hstack([display, colorize_depth(self._depth_m, self.max_depth_m)])
         self.video_lbl.set_image(display)
 
-    def update_frame(
+    def _apply_evaluation(
         self,
-        annotated_bgr: np.ndarray,
-        depth_m: np.ndarray | None,
         eval_result: dict[str, Any],
         robot_safety: dict[str, Any] | None = None,
     ) -> None:
-        self._annotated_bgr, self._depth_m = annotated_bgr, depth_m
-        self._render_frame()
         detected = bool(eval_result.get("detected", False))
         area = float(eval_result.get("area_px", 0.0))
         sharp = float(eval_result.get("sharpness", 0.0))
@@ -207,10 +292,24 @@ class VideoPanel(QWidget):
         )
         safe = robot_safety is None or robot_safety.get("safe", False)
         passed = bool(eval_result.get("passed", False)) and safe
-        self.status_badge.setText("质量通过 · 可采集" if passed else "暂不可采集")
+        self.status_badge.setText(tr("video.ready" if passed else "video.not_ready", self.lang))
         self.status_badge.setStyleSheet(f"color: {'#8fc9a2' if passed else '#ec9898'};")
         reason = str(eval_result.get("reason", ""))
         if not safe:
-            reason = str(robot_safety.get("message", "安全状态异常"))
+            reason = str(robot_safety.get("message", tr("video.safety_fault", self.lang)))
         marker_id = self.marker_cfg.get("id", 398)
-        self.lbl_reason.setText(f"ArUco #{marker_id} · 质量通过" if passed else reason)
+        self.lbl_reason.setText(tr("video.reason_passed", self.lang, marker_id=marker_id) if passed else reason)
+
+    def update_frame(
+        self,
+        annotated_bgr: np.ndarray,
+        depth_m: np.ndarray | None,
+        eval_result: dict[str, Any],
+        robot_safety: dict[str, Any] | None = None,
+    ) -> None:
+        self._last_error = None
+        self._last_eval = eval_result
+        self._last_safety = robot_safety
+        self._annotated_bgr, self._depth_m = annotated_bgr, depth_m
+        self._render_frame()
+        self._apply_evaluation(eval_result, robot_safety)

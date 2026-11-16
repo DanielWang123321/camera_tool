@@ -17,7 +17,7 @@ def detect_session(directory):
         raw = json.loads((path / "session.json").read_text(encoding="utf-8"))
         if raw.get("schema") == 1 and "config" in raw:
             return "eye-to-hand", path
-    raise ValueError("无法识别会话；需要 session_meta.json + samples.json 或 schema=1 的 session.json")
+    raise ValueError("Unrecognized session directory; requires session_meta.json + samples.json or schema=1 session.json")
 
 
 def load_session(
@@ -34,7 +34,10 @@ def load_session(
     if mode == "eye-in-hand":
         from camera_tool.calibration.eye_in_hand.session import CalibrationSession
         from camera_tool.core import load_yaml
-        from camera_tool.services.eye_in_hand import config_for_camera_metadata, solve_session
+        from camera_tool.services.eye_in_hand import (
+            config_for_camera_metadata,
+            solve_session,
+        )
 
         session = CalibrationSession.load_replay(path)
         cfg = load_yaml(config_for_camera_metadata(session.camera_metadata, config, session.robot_metadata))
@@ -59,14 +62,14 @@ def load_session(
                     raise
                 payload["error"] = str(exc)
         elif solve and strict:
-            raise ValueError("回放有效样本不足 5 组")
+            raise ValueError("Replay session has fewer than 5 active samples")
     else:
         from camera_tool.calibration.eye_to_hand.workflow import replay
         from camera_tool.core import Session, write_json
 
         manifest = json.loads((path / "session.json").read_text(encoding="utf-8"))
         if output_path(output).is_relative_to(path):
-            raise ValueError("回放源目录保持只读，请将复算记录写入其他目录")
+            raise ValueError("Replay source directory is read-only; write recomputed output to another directory")
         session = Session(output, "replay")
         payload = {
             "mode": mode,

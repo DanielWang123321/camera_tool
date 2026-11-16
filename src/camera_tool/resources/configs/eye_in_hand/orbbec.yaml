@@ -1,5 +1,3 @@
-# Eye-in-Hand Calibration Template — Orbbec RGB-D (1280x800@30)
-
 marker:
   dictionary: DICT_ARUCO_ORIGINAL
   id: 398
@@ -11,7 +9,7 @@ marker:
 
 camera:
   backend: "orbbec"
-  serial: ""  # Leave empty to auto-select when a single device is connected
+  serial: ""
   width: 1280
   height: 800
   fps: 30
@@ -21,7 +19,7 @@ camera:
   nominal_flange_cam_mm_deg: [45.0, 0.0, 62.0, 0.0, 0.0, 0.0]
 
 robot:
-  ip: ""  # Set via --robot-ip, XARM_IP env var, or GUI input
+  ip: ""
   default_profile: "arm_6dof"
   preset_file: "configs/eye_in_hand/waypoints/close_range.yaml"
   tool:

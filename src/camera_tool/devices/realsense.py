@@ -31,12 +31,12 @@ class RealSenseCamera:
         try:
             import pyrealsense2 as rs
         except ImportError as exc:
-            raise CalibrationError("未安装 pyrealsense2，无法连接 RealSense 相机") from exc
+            raise CalibrationError("pyrealsense2 is not installed; cannot connect to RealSense camera") from exc
 
         ctx = rs.context()
         devices = ctx.query_devices()
         if len(devices) == 0:
-            raise CalibrationError("未检测到 RealSense 相机设备，请检查 USB 3.x 连接")
+            raise CalibrationError("No RealSense camera detected; check USB 3.x connection")
 
         model_filter = str(self.cfg.get("device_model", "")).strip().lower()
         dev = next(
@@ -49,7 +49,7 @@ class RealSenseCamera:
             None,
         )
         if dev is None:
-            raise CalibrationError(f"未检测到指定 RealSense 相机: {self.serial}")
+            raise CalibrationError(f"Specified RealSense camera serial not found: {self.serial}")
         selected_serial = dev.get_info(rs.camera_info.serial_number)
         device_name = dev.get_info(rs.camera_info.name)
 
@@ -80,7 +80,7 @@ class RealSenseCamera:
                 config = candidate
                 break
         if config is None:
-            raise CalibrationError("相机没有可同时启用的彩色与深度流配置")
+            raise CalibrationError("Camera has no mutually compatible color and depth stream profile")
         try:
             profile = self.pipeline.start(config)
             self._pipeline_started = True
@@ -117,7 +117,7 @@ class RealSenseCamera:
         else:
             model_name = model_str
             if model_name not in ("brown_conrady", "inverse_brown_conrady", "modified_brown_conrady"):
-                raise CalibrationError(f"不支持的 RealSense 畸变模型: {model_name}")
+                raise CalibrationError(f"Unsupported RealSense distortion model: {model_name}")
 
         self.metadata = {
             "name": device_name,
@@ -167,13 +167,13 @@ class RealSenseCamera:
 
     def read_frame(self, compute_pointcloud: bool = False) -> dict[str, Any]:
         if not self.connected or self.pipeline is None:
-            raise CalibrationError("RealSense 相机未启动")
+            raise CalibrationError("RealSense camera is not started")
         frames = self.pipeline.wait_for_frames(2000)
         aligned = self.align.process(frames) if self.align is not None else frames
         color_frame = aligned.get_color_frame()
         depth_frame = aligned.get_depth_frame()
         if not color_frame or (self.cfg.get("enable_depth", True) and not depth_frame):
-            raise CalibrationError("RealSense 取流超时或帧不完整")
+            raise CalibrationError("RealSense stream timed out or returned incomplete frameset")
 
         host_ts = time.monotonic()
         color_bgr = np.asanyarray(color_frame.get_data()).copy()

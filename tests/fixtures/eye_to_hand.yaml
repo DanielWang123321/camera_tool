@@ -1,5 +1,3 @@
-# 眼在手外标定测试夹具。点_base = X_base_camera @ 点_camera（彩色光心），位置单位米。
-# 点云已对齐到彩色，不要再乘出厂 depth→color。TCP 为控制器实际工具坐标。
 X_base_camera:
 - - 0.03635783924530321
   - 0.6926066364071496
@@ -110,4 +108,4 @@ calibration:
     - 0.5529799449073282
     - 2.0523814290822644
   depth_ok: false
-  depth_scale_note: 把对齐到彩色的深度（米）乘以此系数后再变到基座；不乘则桌面高度可能有数毫米偏差。
+  depth_scale_note: Multiply color-aligned depth (m) by this factor before transforming to base frame; omitting it may cause several mm tabletop Z offset.

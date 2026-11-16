@@ -10,7 +10,12 @@ import numpy as np
 
 from camera_tool.calibration.eye_to_hand.wrist_model import load_wrist_intrinsics
 from camera_tool.core import CalibrationError, write_json
-from camera_tool.devices.uvc import DEFAULT_BY_ID_PREFIX, DEFAULT_BY_ID_SUFFIX, UvcCamera, list_uvc_devices
+from camera_tool.devices.uvc import (
+    DEFAULT_BY_ID_PREFIX,
+    DEFAULT_BY_ID_SUFFIX,
+    UvcCamera,
+    list_uvc_devices,
+)
 
 
 class WristCamera:
@@ -30,17 +35,17 @@ class WristCamera:
             suffix = str(self.config.get("by_id_suffix", DEFAULT_BY_ID_SUFFIX))
             devices = list_uvc_devices(prefix, suffix)
             if not devices:
-                raise CalibrationError("未检测到腕部 UVC 相机设备，请检查连接或指定序列号")
+                raise CalibrationError("No wrist UVC camera detected; check connection or specify serial")
             if len(devices) > 1:
                 found = ", ".join(sn for sn, _, _ in devices)
-                raise CalibrationError(f"检测到多个腕部 UVC 相机（{found}），请指定序列号")
+                raise CalibrationError(f"Multiple wrist UVC cameras detected ({found}); specify serial")
             self.serial = devices[0][0]
 
         intrinsics_path = str(self.config.get("intrinsics") or "").strip() or f"intrinsics/wrist_{self.serial}.json"
         self.metadata, self.mapping = load_wrist_intrinsics(intrinsics_path)
         if self.metadata.get("serial") != self.serial:
             raise CalibrationError(
-                f"腕部内参序列号 {self.metadata.get('serial')} 与当前相机 {self.serial} 不一致"
+                f"Wrist intrinsics serial {self.metadata.get('serial')} does not match connected camera {self.serial}"
             )
         raw_w, raw_h = self.config["capture_size"]
         rect_w, rect_h = self.config["rectified_size"]
@@ -50,7 +55,7 @@ class WristCamera:
             or self.metadata.get("raw_width", raw_w) != raw_w
             or self.metadata.get("raw_height", raw_h) != raw_h
         ):
-            raise CalibrationError("腕部内参分辨率与配置不一致")
+            raise CalibrationError("Wrist intrinsics resolution does not match configuration")
         np.savez_compressed(self.session.path / "wrist_rectification.npz", mapping=self.mapping)
         write_json(self.session.path / "wrist_camera.json", self.metadata)
         self.cap = UvcCamera({**self.config, "serial": self.serial, "width": raw_w, "height": raw_h})
@@ -69,14 +74,14 @@ class WristCamera:
 
     def frame(self, after_mono: float = 0.0, timeout: float = 3.0, rectify: bool = True) -> dict[str, Any]:
         if self.cap is None or self.mapping is None:
-            raise CalibrationError("腕部相机未打开")
+            raise CalibrationError("Wrist camera is not open")
         deadline = time.monotonic() + timeout
         last = None
         while time.monotonic() < deadline:
             frame = self.cap.read()
             raw, host = frame["color_bgr"], frame["timestamp_mono"]
             if raw.shape[:2] != self.raw_shape:
-                raise CalibrationError("腕部相机运行中分辨率改变，停止标定")
+                raise CalibrationError("Wrist camera resolution changed during capture; aborting calibration")
             self.last_seq += 1
             last = {"sequence": self.last_seq, "host_timestamp": host}
             if host <= after_mono:
@@ -90,8 +95,8 @@ class WristCamera:
                 "source_timestamp_us": int(host * 1e6),
                 "frame_number": self.last_seq,
             }
-        reason = "未收到任何图像" if last is None else "没有停稳后的新图像"
-        raise CalibrationError(f"腕部相机断流：{reason}")
+        reason = "no frames received" if last is None else "no new frame after robot settled"
+        raise CalibrationError(f"Wrist camera stream stalled: {reason}")
 
     def stop(self) -> None:
         if self.cap is not None:
@@ -183,7 +188,7 @@ class BufferedRgbdCamera:
         deadline = time.monotonic() + wait_s
         while True:
             if self.last_error:
-                raise CalibrationError(f"固定相机取流失败：{self.last_error}")
+                raise CalibrationError(f"Fixed camera stream failed: {self.last_error}")
             with self._lock:
                 packet = self._latest
                 age = time.monotonic() - self._latest_mono
@@ -200,8 +205,5 @@ class BufferedRgbdCamera:
     def read(self) -> dict[str, Any]:
         packet = self.get_frame(wait_s=2.0)
         if packet is None:
-            raise CalibrationError("固定相机取流超时")
+            raise CalibrationError("Fixed camera frame read timed out")
         return packet
-
-
-RealSenseD435 = BufferedRgbdCamera

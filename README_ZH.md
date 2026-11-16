@@ -11,7 +11,7 @@
 - **眼在手外标定（Eye-to-Hand）**：通过腕部相机与固定 RGB-D 相机共视桌面 ArUco 标定板建立坐标链，强制执行独立留出姿态复核与深度比例修正后才允许发布外参。
 - **纯离线会话回放**：无需导入任何硬件 SDK 或图形库即可复算历史会话，支持在更换末端执行器后通过 `--tcp-offset` 离线重算并导出外参。
 - **现场诊断工具**：提供基于静态背景三维特征的三脚架微动监测（`OK` / `WARN` / `FAIL`）与基于 Linux `sysfs` 的 USB 3.x 协商速率及丢帧统计测试。
-- **桌面界面与无界面 CLI**：提供五页面 PySide6 暗色桌面端与脚本化 CLI，通过跨进程文件锁防止同一硬件被并发占用。
+- **桌面界面与无界面 CLI**：提供五页面 PySide6 暗色桌面端（默认英文，支持顶栏实时切换 **EN / 中文**）与脚本化 CLI，通过跨进程文件锁防止同一硬件被并发占用。
 
 ## 目录结构
 
@@ -21,9 +21,8 @@ src/camera_tool/
 ├── devices/        # 通用相机后端（realsense, orbbec, uvc, sim）、子进程隔离与机械臂控制接口
 ├── calibration/    # 眼在手上与眼在手外求解器、预设点位规划与采集工作流
 ├── diagnostics/    # 三脚架场景基线监测与 Linux sysfs USB 链路速率检查
-├── maintenance/    # 腕部内参转换、探针角点标定与外参投影可视化核对
 ├── services/       # 与 Qt 解耦的任务编排及跨进程设备租约管理
-├── ui/             # 五页面 PySide6 桌面界面与 3D 坐标系/点云视图
+├── ui/             # 五页面 PySide6 桌面界面、中英切换及 3D 坐标系/点云视图
 └── resources/      # 参数化 YAML 配置模板、udev 规则脚本与原生桥接源码
 ```
 
@@ -50,8 +49,9 @@ pip install -e ".[realsense,orbbec,robot,dev]"
 ### 1. 启动桌面端
 
 ```bash
-camera-tool          # 启动五页面桌面端
-camera-tool --sim    # 以离线仿真模式启动桌面端
+camera-tool                     # 启动五页面桌面端（默认英文）
+camera-tool --sim               # 以离线仿真模式启动桌面端
+CAMERA_TOOL_LANG=zh camera-tool # 启动为中文界面（也可在顶栏实时切换 EN / 中文）
 ```
 
 ### 2. 设备发现与相机预览
@@ -76,6 +76,9 @@ camera-tool calibrate --mode eye-in-hand --preset default --robot-ip <ROBOT_IP> 
 
 # 眼在手上自动采集并求解（预设模板：default / medium_range / orbbec）
 camera-tool calibrate --mode eye-in-hand --preset medium_range --robot-ip <ROBOT_IP>
+
+# 导出眼在手外所需的腕部相机去畸变映射（支持实机或已有会话目录）
+camera-tool wrist-intrinsics
 
 # 眼在手外完整标定
 camera-tool calibrate --mode eye-to-hand --robot-ip <ROBOT_IP>
@@ -113,7 +116,7 @@ camera-tool usb-test --backend realsense --duration 1800 --interval 5 --csv usb_
   - `eye_in_hand/medium_range.yaml` — 中距法兰支架安装模板（对应 `waypoints/medium_range.yaml`）。
   - `eye_in_hand/orbbec.yaml` — `1280x800@30` Orbbec RGB-D 模板。
   - `eye_in_hand/waypoints/profiles.yaml` — 机械臂工作空间构型（`arm_6dof`、`arm_5dof`、`arm_7dof`、`arm_compact_6dof`、`arm_long_6dof`）。
-  - `eye_to_hand.yaml` 与 `corners.yaml` — 眼在手外及探针角点标定模板。
+  - `eye_to_hand.yaml` — 眼在手外标定模板。
 - **去硬件硬编码**：所有受控模板中 `serial: ""`、`robot.ip: ""` 均留空；单机连接单个同类型相机时自动识别，多机场景可通过 `--serial <SN>` 或本地自定义 YAML 指定。
 - **本地运行目录**：标定原始记录（`runs/`）、导出的外参结果（`result/`）及单机腕部相机内参映射（`intrinsics/wrist_<SERIAL>.json`）均保存在本地工作目录并由 `.gitignore` 忽略，不纳入版本库。
 

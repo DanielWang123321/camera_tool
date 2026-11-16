@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "camera-tool"
-version = "0.0.1"
+version = "0.0.2"
 description = "Unified camera preview, hand-eye calibration, offline replay, and device diagnostics"
 readme = "README.md"
 license = "MIT"

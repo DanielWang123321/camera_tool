@@ -231,7 +231,10 @@ class EyeInHand:
     def open(self, context=None, persist: bool = True) -> None:
         backend = self._resolve_backend()
         if self.sim:
-            from camera_tool.devices.sim import SimulatedRgbdCamera, SimulatedRobotController
+            from camera_tool.devices.sim import (
+                SimulatedRgbdCamera,
+                SimulatedRobotController,
+            )
 
             self.camera = SimulatedRgbdCamera(self.cfg["camera"], self.cfg["marker"])
         elif backend == "orbbec":
@@ -249,7 +252,9 @@ class EyeInHand:
 
         metadata = self.camera.start()
         if not self.sim and not str(self.cfg.get("robot", {}).get("ip", "")).strip():
-            raise CalibrationError("未指定机械臂 IP，请通过 --robot-ip、环境变量 XARM_IP 或配置文件设置")
+            raise CalibrationError(
+                "Robot IP is not specified; configure via --robot-ip, XARM_IP env var, or YAML config"
+            )
 
         tool_cfg = _tool_cfg(self.cfg)
         if self.sim:
@@ -259,7 +264,13 @@ class EyeInHand:
         else:
             from camera_tool.devices.robot import XArmController
 
-            self.robot = XArmController(self.cfg["robot"]["ip"], self.planner.robot_cfg, tool_cfg)
+            event_cb = (lambda msg: context.emit("status", msg)) if context else None
+            self.robot = XArmController(
+                self.cfg["robot"]["ip"],
+                self.planner.robot_cfg,
+                tool_cfg,
+                event_cb=event_cb,
+            )
 
         robot_metadata = self.robot.connect()
         if context and not self.sim:
@@ -284,22 +295,26 @@ class EyeInHand:
 
     def poll(self, allow_unready: bool = False) -> dict[str, Any]:
         before = self.robot.read_state()
+        motion_enabled = bool(getattr(self.robot, "moving_enabled", False))
         if before.get("error_code") or (
-            not allow_unready and (before.get("warn_code") or before["state"] not in (0, 1, 2))
+            not allow_unready and motion_enabled and before["state"] not in (0, 1, 2)
         ):
             raise CalibrationError(
-                f"机械臂未就绪或异常，停止任务：状态 {before['state']}（正式标定前请先在控制器端使能机械臂至状态 0/2）"
+                f"Robot controller fault or unexpected state while motion enabled: "
+                f"state={before['state']}, error={before.get('error_code', 0)}"
             )
         kwargs: dict[str, Any] = {"compute_pointcloud": True}
         if self.sim:
             kwargs["x_base_flange"] = before["X_base_flange"]
         frame = self.camera.read(**kwargs)
         after = self.robot.read_state()
+        motion_enabled = bool(getattr(self.robot, "moving_enabled", False))
         if after.get("error_code") or (
-            not allow_unready and (after.get("warn_code") or after["state"] not in (0, 1, 2))
+            not allow_unready and motion_enabled and after["state"] not in (0, 1, 2)
         ):
             raise CalibrationError(
-                f"机械臂曝光后状态异常，停止任务：状态 {after['state']}（正式标定前请先使能机械臂）"
+                f"Robot controller fault or unexpected state after exposure: "
+                f"state={after['state']}, error={after.get('error_code', 0)}"
             )
         mm, deg = pose_error(before["X_base_flange"], after["X_base_flange"])
         stationary = not before["is_moving"] and not after["is_moving"] and mm <= 0.3 and deg <= 0.1
@@ -307,7 +322,7 @@ class EyeInHand:
         assert self.detector is not None
         self.evaluation = self.detector.evaluate(frame["color_bgr"])
         if not stationary:
-            self.evaluation = {**self.evaluation, "passed": False, "reason": "曝光期间机械臂未停稳"}
+            self.evaluation = {**self.evaluation, "passed": False, "reason": "Robot was moving during camera exposure"}
         return {
             "frame": frame,
             "evaluation": self.evaluation,
@@ -331,7 +346,7 @@ class EyeInHand:
 
     def move_next(self) -> dict[str, Any]:
         if not self.planner.waypoints:
-            raise CalibrationError("当前构型配置没有预设点位")
+            raise CalibrationError("No preset waypoints available for the active robot profile")
         index = (self.index + 1) % len(self.planner.waypoints)
         waypoint = self.planner.waypoints[index]
         self.robot.move_to_flange_pose(waypoint["X_base_flange"])
@@ -342,7 +357,7 @@ class EyeInHand:
         self.poll()
         assert self.evaluation is not None and self.state is not None
         if not self.evaluation["passed"]:
-            raise CalibrationError("标定板尚未通过质量检查")
+            raise CalibrationError("Marker has not passed quality checks")
         nominal = pose_from_mm_deg(
             self.cfg.get("camera", {}).get("nominal_flange_cam_mm_deg", [45.0, 0.0, 62.0, 0.0, 0.0, 0.0])
         )
@@ -380,7 +395,7 @@ class EyeInHand:
             "index": self.index,
             "waypoints": self.planner.waypoints,
             "metadata": self.session.camera_metadata,
-            "directory": str(self.session.session_dir or "仿真会话"),
+            "directory": str(self.session.session_dir or "simulation-session"),
         }
 
     def submit(self, command: str, value: Any = None) -> None:
@@ -395,14 +410,14 @@ class EyeInHand:
     ) -> dict[str, Any]:
         failed = True
         label = {
-            "sim": "仿真 RGB-D",
+            "sim": "Simulated RGB-D",
             "orbbec": "Orbbec RGB-D",
             "realsense": "RealSense RGB-D",
         }.get(self._resolve_backend(), "RGB-D")
-        with DEVICES.lease(self.resources, f"{label} 手眼标定"):
+        with DEVICES.lease(self.resources, f"{label} Eye-in-Hand Calibration"):
             try:
                 context.check()
-                context.emit("status", f"连接 {label} 与机械臂")
+                context.emit("status", f"Connecting {label} camera and robot")
                 self.open(context, persist=not check)
                 context.emit("connected", self.snapshot())
                 context.frame("calibration", self.poll(allow_unready=check))
@@ -425,7 +440,12 @@ class EyeInHand:
                             "dof": rob_meta.get("dof"),
                             "firmware": rob_meta.get("firmware"),
                             "state": self.state["state"],
-                            "ready_for_motion": self.state["state"] in (0, 2) and not self.state.get("warn_code"),
+                            "error_code": self.state.get("error_code", 0),
+                            "warn_code": self.state.get("warn_code", 0),
+                            "ready_for_motion": (
+                                not self.state.get("error_code", 0)
+                                and not self.state.get("is_moving", False)
+                            ),
                             "tcp_offset_mm_rad": rob_meta.get("tcp_offset_mm_rad"),
                             "flange_mm_deg": self.state.get("flange_mm_deg"),
                             "table_clearance_mm": self.state.get("safety", {}).get("table_clearance_mm"),
@@ -438,7 +458,7 @@ class EyeInHand:
                         target = self.recenter()
                         context.emit(
                             "status",
-                            f"已根据当前标定板位置重定位点位至 ({target[0]*1000:.1f}, {target[1]*1000:.1f}, {target[2]*1000:.1f}) mm",
+                            f"Recentered waypoints around detected board at ({target[0]*1000:.1f}, {target[1]*1000:.1f}, {target[2]*1000:.1f}) mm",
                         )
                     self._automatic(context)
                     context.check()
@@ -475,16 +495,16 @@ class EyeInHand:
                                 self.session._save_samples_index()
                             elif command == "export":
                                 if self.session.last_solution is None:
-                                    raise CalibrationError("样本变化后须重新求解")
+                                    raise CalibrationError("Samples changed; re-solve before exporting")
                                 output = self.session.export_result(
                                     self.session.last_solution, value or result, cfg=self.cfg
                                 )
-                                context.emit("status", f"已导出 {output}")
+                                context.emit("status", f"Exported {output}")
                             elif command == "recenter":
                                 target = self.recenter()
                                 context.emit(
                                     "status",
-                                    f"已重定位点位至 ({target[0]*1000:.1f}, {target[1]*1000:.1f}, {target[2]*1000:.1f}) mm",
+                                    f"Recentered waypoints to ({target[0]*1000:.1f}, {target[1]*1000:.1f}, {target[2]*1000:.1f}) mm",
                                 )
                         except CalibrationError as exc:
                             if command in ("next", "auto"):
@@ -498,31 +518,40 @@ class EyeInHand:
                 self.close(failed and not check)
 
     def _automatic(self, context) -> None:
+        if hasattr(self.robot, "assert_start_pose_safe"):
+            self.robot.assert_start_pose_safe()
         self.index = -1
         total = len(self.planner.waypoints)
         for step_num in range(1, total + 1):
             context.check()
             next_idx = (self.index + 1) % total
-            wp_name = self.planner.waypoints[next_idx]["name"]
-            context.emit("status", f"[{step_num}/{total}] 前往点位 {wp_name}")
+            wp = self.planner.waypoints[next_idx]
+            wp_name = wp["name"]
+            wp_pose = wp.get("flange_pose_mm_deg")
+            target_desc = (
+                f" (target flange XYZ={[round(float(v), 1) for v in wp_pose[:3]]} mm)"
+                if wp_pose is not None
+                else ""
+            )
+            context.emit("status", f"[{step_num}/{total}] Moving to waypoint {wp_name}{target_desc}")
             try:
                 waypoint = self.move_next()
             except RejectedSample as exc:
                 self.index = next_idx
-                context.emit("status", f"[{step_num}/{total}] 跳过不可达点位 {wp_name}：{exc}")
+                context.emit("status", f"[{step_num}/{total}] Skipped waypoint {wp_name}{target_desc}: {exc}")
                 continue
             context.check()
             try:
                 sample = self.capture(waypoint["name"])
                 context.emit(
                     "status",
-                    f"[{step_num}/{total}] 已采集 #{sample['id']} {waypoint['name']} (PnP RMS={sample['pnp_rms_px']:.3f}px)",
+                    f"[{step_num}/{total}] Captured #{sample['id']} {waypoint['name']} (PnP RMS={sample['pnp_rms_px']:.3f}px)",
                 )
             except CalibrationError as exc:
-                context.emit("status", f"[{step_num}/{total}] 跳过样本 {waypoint['name']}：{exc}")
+                context.emit("status", f"[{step_num}/{total}] Skipped sample {waypoint['name']}: {exc}")
             context.frame("calibration", self.poll())
             context.emit("snapshot", self.snapshot())
         context.check()
-        context.emit("status", "采集结束，正在求解")
+        context.emit("status", "Capture complete; solving calibration")
         self.solve()
         context.check()

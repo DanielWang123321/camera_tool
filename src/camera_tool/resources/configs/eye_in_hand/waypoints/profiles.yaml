@@ -1,5 +1,3 @@
-# Generic Robot Kinematic & Workspace Profiles
-
 profiles:
   arm_6dof:
     name: "6-DoF Standard Arm (700mm)"

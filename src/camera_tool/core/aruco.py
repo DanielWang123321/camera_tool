@@ -34,7 +34,7 @@ class MarkerDetector:
         self.camera = camera
         dict_name = str(marker_cfg.get("dictionary", "DICT_ARUCO_ORIGINAL"))
         if not hasattr(cv2.aruco, dict_name):
-            raise CalibrationError(f"OpenCV 不存在 ArUco 字典: {dict_name}")
+            raise CalibrationError(f"OpenCV does not define ArUco dictionary: {dict_name}")
         dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, dict_name))
         params = cv2.aruco.DetectorParameters()
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_CONTOUR
@@ -45,7 +45,7 @@ class MarkerDetector:
         if image is None or image.shape[:2] != (self.camera.height, self.camera.width):
             return {
                 "passed": False,
-                "reason": "图像尺寸与相机内参不匹配",
+                "reason": "Image dimensions do not match camera intrinsics",
                 "detected": False,
                 "area_px": 0.0,
                 "sharpness": 0.0,
@@ -63,7 +63,7 @@ class MarkerDetector:
         if len(matches) == 0:
             return {
                 "passed": False,
-                "reason": f"未检测到标定码 ID={target_id}",
+                "reason": f"Marker ID={target_id} not detected",
                 "detected": False,
                 "area_px": 0.0,
                 "sharpness": 0.0,
@@ -75,7 +75,7 @@ class MarkerDetector:
         if len(matches) > 1:
             return {
                 "passed": False,
-                "reason": f"检测到多个相同编号标定码 (ID={target_id})",
+                "reason": f"Multiple markers detected with the same ID (ID={target_id})",
                 "detected": False,
                 "area_px": 0.0,
                 "sharpness": 0.0,
@@ -120,18 +120,18 @@ class MarkerDetector:
 
         reasons: list[str] = []
         if near_border:
-            reasons.append("标定码过于靠近画面边缘")
+            reasons.append("Marker is too close to image border")
         if area_px < float(self.cfg["min_area_px"]):
-            reasons.append(f"面积不足 ({area_px:.0f} < {self.cfg['min_area_px']} px²)")
+            reasons.append(f"Area too small ({area_px:.0f} < {self.cfg['min_area_px']} px^2)")
         if sharpness < float(self.cfg["min_sharpness"]):
-            reasons.append(f"清晰度不足 ({sharpness:.1f} < {self.cfg['min_sharpness']})")
+            reasons.append(f"Sharpness too low ({sharpness:.1f} < {self.cfg['min_sharpness']})")
         if pnp_rms_px > float(self.cfg["max_pnp_rms_px"]):
-            reasons.append(f"PnP 误差超限 ({pnp_rms_px:.2f} > {self.cfg['max_pnp_rms_px']} px)")
+            reasons.append(f"PnP RMS exceeds limit ({pnp_rms_px:.2f} > {self.cfg['max_pnp_rms_px']} px)")
 
         passed = len(reasons) == 0
         return {
             "passed": passed,
-            "reason": "质检通过" if passed else "；".join(reasons),
+            "reason": "Passed" if passed else "; ".join(reasons),
             "detected": True,
             "area_px": area_px,
             "sharpness": sharpness,
@@ -144,7 +144,7 @@ class MarkerDetector:
     def detect(self, image: np.ndarray) -> dict[str, Any]:
         """Strictly detect marker: raise CalibrationError on size mismatch or RejectedSample on gate failure."""
         if image is None or image.shape[:2] != (self.camera.height, self.camera.width):
-            raise CalibrationError("检测图像尺寸与相机内参不一致")
+            raise CalibrationError("Detection image dimensions do not match camera intrinsics")
         res = self.evaluate(image)
         if not res["passed"]:
             raise RejectedSample(res["reason"])

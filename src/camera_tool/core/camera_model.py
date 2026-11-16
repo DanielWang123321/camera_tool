@@ -21,7 +21,7 @@ def marker_object_points(side_m: float) -> np.ndarray:
     """Return 3D coordinates of the 4 planar square marker corners in the marker frame (Z=0)."""
     side = float(side_m)
     if not (0.01 <= side <= 1.0):
-        raise CalibrationError(f"标定码边长超出合理范围: {side} m")
+        raise CalibrationError(f"Marker side length out of valid range: {side} m")
     half = side / 2.0
     return np.array(
         [
@@ -62,9 +62,9 @@ class CameraModel:
 
         normalized = _normalize_distortion_model(metadata.get("model", "brown_conrady"))
         if normalized not in SUPPORTED_DISTORTION_MODELS:
-            raise CalibrationError(f"求解器不接受未经处理的相机模型：{metadata.get('model')}")
+            raise CalibrationError(f"Unsupported raw camera distortion model: {metadata.get('model')}")
         if self.distortion.size not in (0, 4, 5, 8, 12, 14) or not np.isfinite(self.distortion).all():
-            raise CalibrationError("相机畸变参数无效")
+            raise CalibrationError("Invalid camera distortion parameters")
         if self.distortion.size == 0:
             self.distortion = np.zeros(5, dtype=float)
         self.model = "pinhole" if np.allclose(self.distortion, 0.0) else normalized
@@ -78,7 +78,7 @@ class CameraModel:
             or self.width <= 0
             or self.height <= 0
         ):
-            raise CalibrationError("相机内参矩阵 K 或分辨率无效")
+            raise CalibrationError("Invalid camera intrinsics matrix K or image dimensions")
 
     def project(self, points_3d: np.ndarray) -> np.ndarray:
         pts = np.asarray(points_3d, dtype=float).reshape(-1, 3)
@@ -198,7 +198,7 @@ class CameraModel:
                 rms = float(np.sqrt(np.mean(res**2)))
                 candidates.append((pose, rms))
         if not candidates:
-            raise RejectedSample("ArUco 标定码 PnP 姿态求解失败")
+            raise RejectedSample("ArUco marker PnP pose estimation failed")
         candidates.sort(key=lambda item: item[1])
         return candidates
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from camera_tool.calibration.eye_in_hand.solver import evaluate_depth_consistency, solve_hand_eye_all
+from camera_tool.calibration.eye_in_hand.solver import (
+    evaluate_depth_consistency,
+    solve_hand_eye_all,
+)
 from camera_tool.calibration.eye_in_hand.waypoints import WaypointPlanner
 from camera_tool.core import (
     CameraModel,
@@ -76,7 +79,6 @@ def test_eye_in_hand_solver_accuracy_with_noise() -> None:
     assert board_mm < 0.6
     assert board_deg < 0.08
 
-    # Verify X_tcp_cam accounts for tcp_offset
     expected_tcp_cam = inv_transform(pose_from_mm_rad(tcp_offset)) @ solution["X_flange_cam"]
     tcp_mm, tcp_deg = pose_error(solution["X_tcp_cam"], expected_tcp_cam)
     assert tcp_mm < 1e-6 and tcp_deg < 1e-6
@@ -90,7 +92,6 @@ def test_depth_consistency_verification() -> None:
     flange_cam = make_transform(np.eye(3), [0.05, 0.0, 0.06])
     base_board = make_transform(np.eye(3), [0.40, 0.0, 0.0])
 
-    # Generate synthetic table points at Z_base = 0 transformed into camera frame
     xs, ys = np.meshgrid(np.linspace(0.32, 0.48, 15), np.linspace(-0.08, 0.08, 15))
     pts_base = np.column_stack([xs.ravel(), ys.ravel(), np.zeros(xs.size)])
     pts_cam = transform_points(inv_transform(flange @ flange_cam), pts_base)

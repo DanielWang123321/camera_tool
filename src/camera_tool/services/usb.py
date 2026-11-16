@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime
 import time
+from datetime import datetime
 
 from camera_tool.devices.registry import create_camera, device_resource
 from camera_tool.paths import output_path
@@ -93,7 +93,7 @@ class UsbStatistics:
 
 def export_csv(rows, path):
     if not rows:
-        raise ValueError("没有可导出的 USB 测试数据")
+        raise ValueError("No USB test data to export")
     path = output_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as stream:
@@ -115,14 +115,14 @@ def usb_test(
     link_reader=None,
 ):
     if duration <= 0 or interval <= 0 or max_gap <= 0 or min_fps <= 0:
-        raise ValueError("测试时长、统计间隔、帧率与间隔阈值必须大于 0")
+        raise ValueError("duration, interval, min_fps, and max_gap must be greater than 0")
     backend = str(config.get("backend") or config.get("kind") or "realsense").strip().lower()
     if backend not in ("realsense", "orbbec"):
-        raise ValueError("USB 稳定性测试仅支持 realsense 或 orbbec 后端")
+        raise ValueError("USB stability test only supports realsense or orbbec backends")
     stats, rows = UsbStatistics(min_fps, max_gap), []
     camera = (camera_factory or create_camera)(backend, {**config, "enable_depth": False})
     summary = None
-    with DEVICES.lease([device_resource(backend, config.get("serial", ""))], "USB 稳定性测试"):
+    with DEVICES.lease([device_resource(backend, config.get("serial", ""))], "USB Stability Test"):
         try:
             context.check()
             metadata = camera.start()
@@ -131,7 +131,11 @@ def usb_test(
             def read_link():
                 if link_reader:
                     return link_reader()
-                from camera_tool.diagnostics.usb_link import find_usb_sysfs, normalize_usb_type, read_current_usb_info
+                from camera_tool.diagnostics.usb_link import (
+                    find_usb_sysfs,
+                    normalize_usb_type,
+                    read_current_usb_info,
+                )
 
                 if backend == "realsense":
                     device = camera.pipeline.get_active_profile().get_device()
@@ -152,7 +156,7 @@ def usb_test(
                     stats.record(frame["timestamp_mono"], frame["frame_number"])
                 except RuntimeError as exc:
                     stats.stalls += 1
-                    context.emit("status", f"无帧：{exc}")
+                    context.emit("status", f"No frame: {exc}")
                 now = time.monotonic()
                 if now >= next_report:
                     descriptor, speed = read_link()

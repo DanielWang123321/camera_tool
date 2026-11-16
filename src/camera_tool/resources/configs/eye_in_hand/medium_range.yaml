@@ -1,5 +1,3 @@
-# Eye-in-Hand Calibration Template — Medium-Range RGB-D (e.g. flange bracket mount)
-
 marker:
   dictionary: DICT_ARUCO_ORIGINAL
   id: 398
@@ -11,7 +9,7 @@ marker:
 
 camera:
   backend: "realsense"
-  serial: ""  # Leave empty to auto-select when a single device is connected
+  serial: ""
   width: 1280
   height: 720
   fps: 30
@@ -22,7 +20,7 @@ camera:
   board_center_m: [0.41, 0.00, 0.00]
 
 robot:
-  ip: ""  # Set via --robot-ip, XARM_IP env var, or GUI input
+  ip: ""
   default_profile: "arm_6dof"
   preset_file: "configs/eye_in_hand/waypoints/medium_range.yaml"
   tool:

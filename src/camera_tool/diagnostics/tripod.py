@@ -11,7 +11,12 @@ import numpy as np
 import yaml
 
 from camera_tool.calibration.eye_to_hand.cameras import BufferedRgbdCamera
-from camera_tool.core import CalibrationError, CameraModel, json_default, valid_transform
+from camera_tool.core import (
+    CalibrationError,
+    CameraModel,
+    json_default,
+    valid_transform,
+)
 from camera_tool.diagnostics.scene_lock import (
     ConfirmGate,
     Observation,
@@ -50,14 +55,14 @@ def median_depth_stack(depths: list[np.ndarray]) -> np.ndarray:
 def load_yaml(path: Path) -> dict[str, Any]:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
-        raise CalibrationError(f"{path} 不是有效配置")
+        raise CalibrationError(f"{path} is not a valid YAML mapping")
     return raw
 
 
 def load_result(path: Path) -> dict[str, Any]:
     raw = load_yaml(path)
     if raw.get("X_base_camera") is None:
-        raise CalibrationError(f"{path} 没有 X_base_camera，请先完成标定")
+        raise CalibrationError(f"{path} is missing X_base_camera; run calibration first")
     return raw
 
 
@@ -121,9 +126,9 @@ def draw_observation(
     hull = workspace_hull(baseline.camera, baseline.x_base_camera, baseline.bbox_min, baseline.bbox_max)
     draw_dashed_hull(out, hull, (0, 255, 255))
     for pt in np.asarray(obs.rejected_now).reshape(-1, 2):
-        cv2.circle(out, (int(round(pt[0])), int(round(pt[1]))), 3, (0, 0, 220), -1, cv2.LINE_AA)
+        cv2.circle(out, (round(pt[0]), round(pt[1])), 3, (0, 0, 220), -1, cv2.LINE_AA)
     for pt in np.asarray(obs.inlier_now).reshape(-1, 2):
-        cv2.circle(out, (int(round(pt[0])), int(round(pt[1]))), 3, (0, 220, 0), -1, cv2.LINE_AA)
+        cv2.circle(out, (round(pt[0]), round(pt[1])), 3, (0, 220, 0), -1, cv2.LINE_AA)
     for p_now, p_old, err in zip(obs.grid_px_now, obs.grid_px_old, obs.grid_err_mm):
         a = tuple(np.round(p_now).astype(int))
         delta = p_now - p_old
@@ -152,7 +157,7 @@ def grab_corrected(
 ) -> dict[str, Any]:
     frame = cam.get_frame(wait_s=wait_s, max_age_s=0.5, after_frame_number=after_frame_number)
     if frame is None:
-        raise CalibrationError("固定相机断流")
+        raise CalibrationError("Fixed camera stream stalled")
     return {
         **frame,
         "depth_m": np.asarray(frame["depth_m"], dtype=np.float32) * float(depth_scale),
@@ -183,7 +188,7 @@ def lock_from_camera(
         depths.append(frame["depth_m"])
         if context:
             context.frame("tripod", {"color_bgr": frame["color"]})
-            context.emit("status", f"锁定基线 {len(colors)}/{cfg['lock_frames']}")
+            context.emit("status", f"Locking baseline {len(colors)}/{cfg['lock_frames']}")
     color = colors[-1]
     depth_m = median_depth_stack(depths)
     baseline = lock_scene(
@@ -199,7 +204,7 @@ def lock_from_camera(
         cfg=cfg,
     )
     path = save_baseline(baseline, directory)
-    print(f"已锁基线：{path}  静物点 {len(baseline.pixels)}  ORB {len(baseline.orb_pixels)}", flush=True)
+    print(f"Baseline locked: {path} (static points={len(baseline.pixels)}, ORB={len(baseline.orb_pixels)})", flush=True)
     return path
 
 
